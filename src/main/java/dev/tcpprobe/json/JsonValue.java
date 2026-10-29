@@ -7,15 +7,15 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * Immutable JSON value model.
+ * 不可变的 JSON 值模型。
  *
- * <p>Hand-rolled on purpose: the whole service ships without a single third-party runtime
- * dependency, so the JSON codec is part of the delivered code and stays small and auditable.</p>
+ * <p>刻意手写实现：整个服务交付时不带任何第三方运行时依赖，所以 JSON 编解码器
+ * 本身就是交付代码的一部分，保持精简且可审计。</p>
  */
 public sealed interface JsonValue
         permits JsonValue.Obj, JsonValue.Arr, JsonValue.Str, JsonValue.Num, JsonValue.Bool, JsonValue.Null {
 
-    /** JSON object; insertion order is preserved so responses stay readable. */
+    /** JSON 对象；保留插入顺序，因此响应保持可读。 */
     record Obj(Map<String, JsonValue> values) implements JsonValue {
         public Obj {
             values = java.util.Collections.unmodifiableMap(new LinkedHashMap<>(values));
@@ -54,7 +54,7 @@ public sealed interface JsonValue
         }
     }
 
-    /** Number kept as its literal text so integers do not silently lose precision. */
+    /** 数字以其字面量文本保存，使整数不会静默丢失精度。 */
     record Num(String raw) implements JsonValue {
         public Num {
             Objects.requireNonNull(raw, "raw");
@@ -78,7 +78,7 @@ public sealed interface JsonValue
         public static final Null INSTANCE = new Null();
     }
 
-    // ---------------------------------------------------------------- typed accessors
+    // ---------------------------------------------------------------- 类型化访问器
 
     default Obj asObj() {
         if (this instanceof Obj o) {

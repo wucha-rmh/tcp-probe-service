@@ -6,19 +6,17 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.LongSupplier;
 
 /**
- * Two-level token-bucket rate limiter: one global bucket protecting the service as a whole and one
- * bucket per client key (usually the caller's IP).
+ * 两级令牌桶限流器：一个全局桶保护整个服务，另一个按客户端分桶（key 通常是调用方的 IP）。
  *
- * <p>Why a token bucket instead of a fixed window? It smooths bursts (a caller may use its whole
- * burst budget at once) while enforcing a hard long-run rate, and it needs no per-window state
- * reset or background timer. The cost is a little float arithmetic per request.</p>
+ * <p>为什么用令牌桶而不是固定窗口？它既能容忍突发（调用方可以一次性用掉自己的全部突发额度），
+ * 同时施加严格的长期速率，而且不需要按窗口重置状态，也不需要后台定时器。代价是每个请求多
+ * 一点浮点运算。</p>
  *
- * <p>Idle client buckets are swept periodically so that a stream of unique source addresses cannot
- * grow the map without bound.</p>
+ * <p>空闲的客户端桶会被周期性清理，这样源源不断的唯一源地址不会让 map 无限增长。</p>
  */
 public final class RateLimiter {
 
-    /** Result of a single admission attempt. */
+    /** 单次准入尝试的结果。 */
     public record Decision(boolean allowed, long retryAfterSeconds, double remaining, String limitReason) {
 
         public static Decision allow(double remaining) {
@@ -58,10 +56,10 @@ public final class RateLimiter {
     }
 
     /**
-     * Attempts to admit one request for {@code clientKey}.
+     * 尝试为 {@code clientKey} 准入一个请求。
      *
-     * <p>The global bucket is consumed first; if it refuses, the client bucket is left untouched so
-     * that one noisy neighbour does not drain everybody else's allowance.</p>
+     * <p>先消耗全局桶；如果全局桶拒绝，客户端桶就保持不动，这样一个吵闹的邻居不会把其他人的
+     * 额度一起抽干。</p>
      */
     public Decision acquire(String clientKey) {
         if (!global.tryAcquire(1)) {
@@ -78,12 +76,12 @@ public final class RateLimiter {
         return Decision.allow(state.bucket.available());
     }
 
-    /** Number of client buckets currently tracked (exposed for metrics and tests). */
+    /** 当前跟踪的客户端桶数量（暴露给指标和测试使用）。 */
     public int trackedClients() {
         return clients.size();
     }
 
-    /** Drops client buckets that have been idle for longer than {@code idleSeconds}. */
+    /** 丢弃空闲超过 {@code idleSeconds} 的客户端桶。 */
     public int sweepIdle(long idleSeconds) {
         long now = nanoClock.getAsLong();
         long threshold = idleSeconds * 1_000_000_000L;

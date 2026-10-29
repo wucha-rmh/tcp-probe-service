@@ -3,11 +3,11 @@ package dev.tcpprobe.service;
 import java.util.function.LongSupplier;
 
 /**
- * Token bucket used by the rate limiter.
+ * 限流器使用的令牌桶。
  *
- * <p>Tokens refill continuously at {@code refillPerSecond} up to {@code capacity}. A burst is
- * therefore allowed up to the bucket size while the long-run rate stays at
- * {@code refillPerSecond}. The clock is injectable so tests do not need to sleep.</p>
+ * <p>令牌以 {@code refillPerSecond} 的速率持续回填，上限为 {@code capacity}。因此一次突发最
+ * 多可以用掉整个桶的大小，而长期速率保持在 {@code refillPerSecond}。时钟可以注入，所以测试
+ * 不需要 sleep。</p>
  */
 public final class TokenBucket {
 
@@ -35,7 +35,7 @@ public final class TokenBucket {
         this.lastNanos = nanoClock.getAsLong();
     }
 
-    /** Tries to take {@code permits} tokens. Returns false when the bucket is too empty. */
+    /** 尝试取走 {@code permits} 个令牌。桶太空时返回 false。 */
     public synchronized boolean tryAcquire(double permits) {
         if (permits <= 0) {
             return true;
@@ -51,13 +51,13 @@ public final class TokenBucket {
         return false;
     }
 
-    /** Nanoseconds until {@code permits} tokens become available (0 when available now). */
+    /** 距离 {@code permits} 个令牌变为可用所需的纳秒数（立即可用时为 0）。 */
     public synchronized long nanosUntilAvailable(double permits) {
         if (permits <= 0) {
             return 0L;
         }
         if (permits > capacity) {
-            // Cannot ever be satisfied by a single request; report a full refill cycle.
+            // 单个请求永远无法满足；报告一个完整的回填周期。
             return (long) (capacity / refillPerSecond * 1_000_000_000L);
         }
         refill();

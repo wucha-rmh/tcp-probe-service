@@ -8,11 +8,10 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.LongAdder;
 
 /**
- * Process-wide counters exposed through {@code GET /api/v1/stats}.
+ * 通过 {@code GET /api/v1/stats} 暴露的进程级计数器。
  *
- * <p>Only monotonic counters and gauges are kept: no histograms, no percentiles. That is enough to
- * operate the service and answer "is it rate limiting, is it saturated, are probes failing?" while
- * staying dependency-free and cheap to update from many threads.</p>
+ * <p>只保留单调计数器和 gauge：没有直方图，没有百分位。这足以运维这个服务并回答“是否在限流、
+ * 是否已饱和、探测是否在失败”，同时保持无依赖，且从多个线程更新都很廉价。</p>
  */
 public final class Metrics {
 
@@ -103,7 +102,7 @@ public final class Metrics {
         return tasksRunning.get();
     }
 
-    /** Immutable snapshot ready for JSON rendering. */
+    /** 可直接用于 JSON 渲染的不可变快照。 */
     public Map<String, Object> snapshot() {
         Map<String, Object> probes = new LinkedHashMap<>();
         probes.put("attempted", probesAttempted.sum());

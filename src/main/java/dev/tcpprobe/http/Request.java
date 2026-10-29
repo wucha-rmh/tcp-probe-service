@@ -15,7 +15,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
-/** Immutable view over one inbound HTTP request, with body-limit and decoding handled once. */
+/** 一个入站 HTTP 请求的不可变视图，请求体上限与解码只处理一次。 */
 public final class Request {
 
     private final HttpExchange exchange;
@@ -68,7 +68,7 @@ public final class Request {
         return new String(body, StandardCharsets.UTF_8);
     }
 
-    /** Parses the body as JSON, converting syntax errors into a 400 with the parser offset. */
+    /** 把请求体解析为 JSON，将语法错误转换为带解析器偏移量的 400。 */
     public JsonValue bodyJson() {
         if (body.length == 0) {
             throw ApiException.badRequest("EMPTY_BODY", "request body must be a JSON object");
@@ -81,8 +81,8 @@ public final class Request {
     }
 
     /**
-     * Address of the caller. {@code X-Forwarded-For} is only honoured when the deployment opts in,
-     * because a client can otherwise trivially forge the identity used for rate limiting.
+     * 调用方的地址。只有部署显式选择启用时才会采信 {@code X-Forwarded-For}，
+     * 否则客户端可以轻易伪造用于限流的身份。
      */
     public String clientIp(boolean trustProxyHeader) {
         if (trustProxyHeader) {

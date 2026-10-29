@@ -9,7 +9,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/** {@code GET /}: a self-describing index, handy when curling a fresh deployment. */
+/** {@code GET /}：自描述的索引，在新部署上 curl 一下时很方便。 */
 public final class RootHandler implements Handler {
 
     private final Config config;

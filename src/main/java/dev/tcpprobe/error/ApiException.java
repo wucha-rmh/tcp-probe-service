@@ -5,10 +5,10 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * Error that maps directly onto an HTTP response.
+ * 直接映射到一条 HTTP 响应的错误。
  *
- * <p>The service layer throws this instead of returning error codes, so that handlers stay free of
- * branching. The HTTP layer is the only place that knows about status codes and the JSON envelope.</p>
+ * <p>服务层抛出它而不是返回错误码，从而让处理器不必写分支判断。
+ * HTTP 层是唯一了解状态码与 JSON 外层结构的代码。</p>
  */
 public class ApiException extends RuntimeException {
 
@@ -17,7 +17,7 @@ public class ApiException extends RuntimeException {
 
     private final int status;
     private final String code;
-    /** Owned copy, kept as a concrete serializable type so the exception itself stays serializable. */
+    /** 自己持有的副本，保持为具体的可序列化类型，以便异常本身保持可序列化。 */
     private final ArrayList<String> details;
     private final long retryAfterSeconds;
 
@@ -49,7 +49,7 @@ public class ApiException extends RuntimeException {
         return Collections.unmodifiableList(details);
     }
 
-    /** Value for the {@code Retry-After} header, or {@code -1} when not applicable. */
+    /** {@code Retry-After} 响应头的取值，不适用时为 {@code -1}。 */
     public long retryAfterSeconds() {
         return retryAfterSeconds;
     }

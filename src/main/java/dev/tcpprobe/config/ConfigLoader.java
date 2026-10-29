@@ -14,19 +14,19 @@ import java.util.Map;
 import java.util.Properties;
 
 /**
- * Resolves the effective configuration from three layers, in increasing precedence:
+ * 按优先级递增的顺序，从四个层次解析出实际生效的配置：
  *
  * <ol>
- *   <li>built-in defaults ({@link Config#defaults()});</li>
- *   <li>a {@code .properties} file ({@code config/application.properties} by default, or the path
- *       in the {@code PROBE_CONFIG} environment variable);</li>
- *   <li>environment variables named {@code PROBE_} + key in upper snake case
- *       ({@code PROBE_SERVER_PORT} for {@code server.port});</li>
- *   <li>command line arguments of the form {@code --key=value}.</li>
+ *   <li>内置默认值（{@link Config#defaults()}）；</li>
+ *   <li>一个 {@code .properties} 文件（默认是 {@code config/application.properties}，
+ *       或由 {@code PROBE_CONFIG} 环境变量给出的路径）；</li>
+ *   <li>名为 {@code PROBE_} + 大写蛇形 key 的环境变量
+ *       （{@code server.port} 对应 {@code PROBE_SERVER_PORT}）；</li>
+ *   <li>形如 {@code --key=value} 的命令行参数。</li>
  * </ol>
  *
- * <p>Unknown keys are rejected on purpose: a typo in a deployment manifest should fail loudly
- * rather than silently fall back to a default.</p>
+ * <p>未知 key 会被刻意拒绝：部署清单里的一个拼写错误应当明确失败，
+ * 而不是静默回退到默认值。</p>
  */
 public final class ConfigLoader {
 
@@ -56,10 +56,10 @@ public final class ConfigLoader {
     }
 
     /**
-     * Loads configuration from the real process environment plus the given CLI arguments.
+     * 从真实进程环境加上给定的 CLI 参数加载配置。
      *
-     * <p>Accepts {@code --config=<path>} (or {@code --config <path>}) to point at a properties
-     * file other than {@code config/application.properties} / {@code $PROBE_CONFIG}.</p>
+     * <p>接受 {@code --config=<path>}（或 {@code --config <path>}），用于指向
+     * {@code config/application.properties} / {@code $PROBE_CONFIG} 之外的 properties 文件。</p>
      */
     public static Config load(String[] cliArgs) {
         List<String> rest = new ArrayList<>();
@@ -86,9 +86,9 @@ public final class ConfigLoader {
     }
 
     /**
-     * @param cliArgs      arguments as passed to {@code main}, e.g. {@code --server.port=9090}
-     * @param env          environment variables
-     * @param explicitFile properties file to use; {@code null} keeps the default lookup
+     * @param cliArgs      传给 {@code main} 的参数，例如 {@code --server.port=9090}
+     * @param env          环境变量
+     * @param explicitFile 要使用的 properties 文件；{@code null} 表示保持默认查找逻辑
      */
     public static Config load(String[] cliArgs, Map<String, String> env, Path explicitFile) {
         Map<String, String> cli = parseCli(cliArgs);
@@ -183,7 +183,7 @@ public final class ConfigLoader {
         return "PROBE_" + key.replace('.', '_').replace('-', '_').toUpperCase(Locale.ROOT);
     }
 
-    // ------------------------------------------------------------------ typed access
+    // ------------------------------------------------------------------ 类型化访问
 
     private Config toConfig() {
         Config d = Config.defaults();
@@ -259,7 +259,7 @@ public final class ConfigLoader {
         };
     }
 
-    /** Rejects keys that no layer recognises, keeping misconfiguration visible. */
+    /** 拒绝任何层次都不认识的 key，让错误配置保持可见。 */
     void validateKeys() {
         for (String key : values.keySet()) {
             if (!KNOWN_KEYS.contains(key)) {
@@ -269,7 +269,7 @@ public final class ConfigLoader {
         }
     }
 
-    /** Human-readable summary written to the log at startup. */
+    /** 启动时写入日志、便于人阅读的摘要。 */
     public static Map<String, Object> summary(Config c) {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("bind", c.bindAddress() + ":" + c.port());

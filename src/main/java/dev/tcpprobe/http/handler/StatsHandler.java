@@ -7,7 +7,7 @@ import dev.tcpprobe.service.Metrics;
 
 import java.util.Map;
 
-/** {@code GET /api/v1/stats}: counters an operator needs to tell "busy" from "broken". */
+/** {@code GET /api/v1/stats}：运维人员用来区分“繁忙”与“故障”所需的计数器。 */
 public final class StatsHandler implements Handler {
 
     private final Metrics metrics;

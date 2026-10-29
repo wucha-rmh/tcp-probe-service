@@ -1,6 +1,6 @@
 package dev.tcpprobe.config;
 
-/** Raised when the runtime configuration is invalid or contradictory. */
+/** 当运行时配置非法或自相矛盾时抛出。 */
 public class ConfigurationException extends RuntimeException {
 
     @java.io.Serial

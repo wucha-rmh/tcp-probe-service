@@ -1,32 +1,32 @@
 package dev.tcpprobe.probe;
 
-/** Outcome of a single TCP connectivity probe. */
+/** 单次 TCP 连通性探测的结果。 */
 public enum ProbeStatus {
 
-    /** The TCP handshake completed: something is listening on the target port. */
+    /** TCP 握手完成：目标端口上确实有东西在监听。 */
     CONNECTED,
 
-    /** The host answered with a TCP RST: the host is reachable but nothing listens on that port. */
+    /** 主机以 TCP RST 作答：主机可达，但该端口上没有任何监听者。 */
     REFUSED,
 
-    /** The handshake did not complete within the configured timeout. */
+    /** 握手未在配置的超时内完成。 */
     TIMEOUT,
 
-    /** The host name could not be resolved. */
+    /** 主机名无法解析。 */
     UNRESOLVED,
 
-    /** The network reported that the destination cannot be reached (no route, ACL, filtering). */
+    /** 网络报告目的地不可达（无路由、ACL、过滤）。 */
     UNREACHABLE,
 
-    /** Any other I/O or runtime error; {@code detail} carries the message. */
+    /** 其他任意 I/O 或运行时错误；{@code detail} 携带消息。 */
     ERROR;
 
-    /** True when the probe produced a definitive answer about the target port. */
+    /** 当探测对目标端口给出了确定性答案时为 true。 */
     public boolean isConclusive() {
         return this == CONNECTED || this == REFUSED;
     }
 
-    /** True when the target is considered reachable at the network level. */
+    /** 当目标在网络层面被视为可达时为 true。 */
     public boolean isHostReachable() {
         return this == CONNECTED || this == REFUSED;
     }

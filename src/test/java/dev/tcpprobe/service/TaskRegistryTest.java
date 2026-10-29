@@ -33,8 +33,8 @@ class TaskRegistryTest {
     void evictsExpiredFinishedTasks() throws InterruptedException {
         TaskRegistry registry = new TaskRegistry(10);
         registry.put(finishedTask("p_1"));
-        // Instant resolution is coarse on Windows: with TTL=0 the cutoff must be strictly after
-        // finishedAt, otherwise the comparison is a same-tick tie and nothing is evicted.
+        // Instant 在 Windows 上精度很粗：TTL=0 时 cutoff 必须严格晚于 finishedAt，
+        // 否则比较会变成同一 tick 的平局，什么都驱逐不掉。
         Thread.sleep(20);
         assertEquals(1, registry.evictFinishedOlderThan(Duration.ZERO));
         assertTrue(registry.get("p_1").isEmpty());

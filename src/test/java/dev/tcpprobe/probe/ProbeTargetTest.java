@@ -48,7 +48,7 @@ class ProbeTargetTest {
 
     @Test
     void lastColonSplitsPort() {
-        // Bare IPv6 without brackets is ambiguous on purpose: the port must be bracketed.
+        // 不带方括号的裸 IPv6 是有意被视为歧义的：端口必须加方括号。
         assertThrows(IllegalArgumentException.class, () -> ProbeTarget.parse("::1:80"));
     }
 }

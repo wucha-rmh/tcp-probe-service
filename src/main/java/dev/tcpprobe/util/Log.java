@@ -6,12 +6,11 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 
 /**
- * Tiny single-line logger.
+ * 极简的单行日志器。
  *
- * <p>The service deliberately avoids a logging framework so that the delivered jar has no
- * external runtime dependency; the trade-off is that only plain text output is available.
- * Every line is emitted atomically through {@link PrintStream#println(String)} so that
- * interleaving between request threads cannot corrupt a line.</p>
+ * <p>服务刻意不使用日志框架，以便交付的 jar 不带有任何外部运行时依赖；
+ * 代价是只能提供纯文本输出。每一行都通过 {@link PrintStream#println(String)} 原子地输出，
+ * 因此请求线程之间的交错不会破坏某一行。</p>
  */
 public final class Log {
 
@@ -55,7 +54,7 @@ public final class Log {
         return level;
     }
 
-    /** Redirects output; used by tests to keep the build log readable. */
+    /** 重定向输出；测试用它保持构建日志可读。 */
     public static void setOut(PrintStream stream) {
         out = stream == null ? System.out : stream;
     }

@@ -11,21 +11,20 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Name resolution with a hard time limit.
+ * 带硬性时间限制的域名解析。
  *
- * <p>{@link InetAddress#getAllByName} has no timeout of its own: against a dead resolver it can
- * block for tens of seconds, which would silently consume the whole batch deadline and turn every
- * target in that batch into a {@code TIMEOUT} even though only one lookup was slow. Resolving on a
- * bounded pool and waiting with {@code Future.get(timeout)} keeps a single lookup from eating the
- * batch: the caller gets a definite answer, and the stalled lookup thread is abandoned to the OS.</p>
+ * <p>{@link InetAddress#getAllByName} 自身没有超时：面对一个失效的解析器，它可能阻塞数十秒，
+ * 从而悄悄耗尽整个批量的截止时间，把该批次中的每个目标都变成 {@code TIMEOUT}，哪怕只有一个查找变慢。
+ * 在有界线程池上解析、并用 {@code Future.get(timeout)} 等待，可以避免单个查找拖垮整个批量：
+ * 调用方总能得到确定的答复，而卡住的查找线程则被丢弃给操作系统。</p>
  *
- * <p>The pool also acts as backpressure: at most {@code maxConcurrentLookups} lookups run at once,
- * so a flood of probes cannot spawn an unbounded number of resolver threads. Threads are daemons,
- * and {@link #close()} shuts the pool down with the service.</p>
+ * <p>线程池同时充当背压：最多只有 {@code maxConcurrentLookups} 个查找同时运行，
+ * 因此大量探测不会催生数量不受限的解析线程。线程均为守护线程，
+ * 且 {@link #close()} 会随服务一起关闭线程池。</p>
  */
 public final class DnsResolver implements AutoCloseable {
 
-    /** Pluggable lookup, so the timeout path can be tested without a real stalled resolver. */
+    /** 可插拔的查找接口，使得无需真实卡死的解析器也能测试超时路径。 */
     @FunctionalInterface
     public interface Lookup {
         InetAddress[] resolve(String host) throws UnknownHostException;
@@ -52,19 +51,18 @@ public final class DnsResolver implements AutoCloseable {
     }
 
     /**
-     * Resolves {@code host}, giving up after {@code timeoutMs}.
+     * 解析 {@code host}，在超过 {@code timeoutMs} 后放弃。
      *
-     * @throws UnknownHostException when the name does not resolve
-     * @throws DnsTimeoutException  when the resolver did not answer within the budget
+     * @throws UnknownHostException 当域名无法解析时
+     * @throws DnsTimeoutException  当解析器未在预算内应答时
      */
     public InetAddress[] resolve(String host, int timeoutMs) throws UnknownHostException, DnsTimeoutException {
         Future<InetAddress[]> future = pool.submit(() -> lookup.resolve(host));
         try {
             return future.get(Math.max(1, timeoutMs), TimeUnit.MILLISECONDS);
         } catch (TimeoutException e) {
-            // The JDK resolver ignores interrupts, so this only frees the queue slot; the thread
-            // itself returns when the OS gives up. Documented tradeoff: bounded thread count, no
-            // blocking of the probe worker.
+            // JDK 解析器忽略中断，因此这里只是释放队列槽位；线程本身要等操作系统放弃后才返回。
+            // 已记录的取舍：线程数有界，且不阻塞探测工作线程。
             future.cancel(true);
             throw new DnsTimeoutException("dns resolution timed out after " + timeoutMs + " ms");
         } catch (InterruptedException e) {

@@ -1,6 +1,6 @@
 package dev.tcpprobe.json;
 
-/** Thrown when a JSON document cannot be parsed or does not match the expected shape. */
+/** 当 JSON 文档无法解析或与预期结构不符时抛出。 */
 public class JsonException extends RuntimeException {
 
     @java.io.Serial

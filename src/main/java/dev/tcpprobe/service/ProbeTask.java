@@ -12,11 +12,11 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * One submitted batch of probe targets and its lifecycle.
+ * 一个已提交的探测目标批次及其生命周期。
  *
- * <p>A task is always executed asynchronously; {@code mode} only records whether the caller offered
- * to wait for the result on the same HTTP request (sync) or took the task id and polls (async).
- * Keeping a single execution path avoids two subtly different code paths for the same work.</p>
+ * <p>任务总是异步执行；{@code mode} 只记录调用方是在同一个 HTTP 请求上等待结果（sync），
+ * 还是拿走任务 id 之后轮询（async）。只保留一条执行路径，可以避免为同样的工作维护两条
+ * 有微妙差异的代码路径。</p>
  */
 public final class ProbeTask {
 
@@ -97,7 +97,7 @@ public final class ProbeTask {
         return status == Status.SUCCEEDED || status == Status.FAILED;
     }
 
-    /** Completed when the task reaches a terminal state; used by long-polling and sync mode. */
+    /** 当任务到达终态时完成；长轮询和 sync 模式会用到它。 */
     public CompletableFuture<Void> completion() {
         return completion;
     }
@@ -129,7 +129,7 @@ public final class ProbeTask {
         completion.complete(null);
     }
 
-    /** Aggregated counts, handy for dashboards and for tests asserting on a batch. */
+    /** 聚合后的计数，适合仪表盘，也适合对某个批次做断言的测试。 */
     public Map<String, Object> summary() {
         Map<ProbeStatus, Integer> counts = new LinkedHashMap<>();
         for (ProbeStatus s : ProbeStatus.values()) {

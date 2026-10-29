@@ -1,10 +1,10 @@
 package dev.tcpprobe.config;
 
 /**
- * Immutable runtime configuration.
+ * 不可变的运行时配置。
  *
- * <p>All values are validated by {@link ConfigLoader}; a bad configuration fails fast at startup
- * instead of surfacing as a confusing runtime error under load.</p>
+ * <p>所有取值都由 {@link ConfigLoader} 校验；非法配置会在启动时快速失败，
+ * 而不是在高负载下表现为令人困惑的运行时错误。</p>
  */
 public record Config(
         String bindAddress,
@@ -25,7 +25,7 @@ public record Config(
         boolean trustProxyHeader,
         String version) {
 
-    /** Upper bound on the overall wall-clock time one batch may consume before it is cut short. */
+    /** 单个批次在被提前截断之前允许消耗的总实际耗时上限。 */
     public long overallDeadlineMs(int targetCount) {
         long perTarget = (long) probeDnsTimeoutMs + probeTimeoutMs + 500L;
         long perWave = (long) Math.ceil((double) targetCount / Math.max(1, maxProbesInFlight)) * perTarget;

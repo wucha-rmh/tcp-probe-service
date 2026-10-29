@@ -47,7 +47,7 @@ class TcpProberTest {
 
     @Test
     void reportsUnresolvedForUnknownHost() {
-        // Deterministic: a real resolver may be slow or NXDOMAIN-cached differently per machine.
+        // 为了确定性：真实 resolver 可能很慢，或者各机器对 NXDOMAIN 的缓存行为不同。
         try (DnsResolver failing = new DnsResolver(1, host -> {
             throw new UnknownHostException(host);
         })) {
@@ -73,8 +73,8 @@ class TcpProberTest {
 
     @Test
     void honoursTimeoutWithoutThrowing() {
-        // 192.0.2.0/24 is TEST-NET-1: guaranteed not to be a real host, so this is a black hole or a
-        // routing refusal — both are legitimate outcomes that must not escape as an exception.
+        // 192.0.2.0/24 是 TEST-NET-1：保证不是真实主机，所以结果要么是黑洞，要么是路由拒绝 ——
+        // 两者都是合法结果，绝不能以异常的形式抛出来。
         ProbeResult result = prober.probe(ProbeTarget.parse("192.0.2.1:9"), 200);
         assertTrue(result.status() == ProbeStatus.TIMEOUT || result.status() == ProbeStatus.UNREACHABLE,
                 "expected TIMEOUT or UNREACHABLE but got " + result.status() + " (" + result.detail() + ")");
@@ -93,10 +93,10 @@ class TcpProberTest {
     private static void startAcceptor(ServerSocket listener) {
         Thread acceptor = new Thread(() -> {
             try (Socket accepted = listener.accept()) {
-                // closing immediately is enough: the probe only needs the handshake
+                // 立即关闭就足够：探测只需要握手完成
                 accepted.getRemoteSocketAddress();
             } catch (IOException e) {
-                // listener closed by the test
+                // listener 已被测试关闭
             }
         });
         acceptor.setDaemon(true);

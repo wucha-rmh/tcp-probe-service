@@ -14,43 +14,39 @@ import java.nio.channels.SocketChannel;
 import java.util.Locale;
 
 /**
- * Hand-written TCP connectivity probe.
+ * 手写的 TCP 连通性探测器。
  *
- * <p>No third-party probing library is used: the implementation opens a plain
- * {@link SocketChannel}, performs the TCP handshake with a bounded timeout and classifies the
- * outcome. The connection is closed immediately afterwards — the goal is reachability, not
- * payload exchange.</p>
+ * <p>不使用任何第三方探测库：实现打开一个普通的 {@link SocketChannel}，在限定超时内完成 TCP 握手，
+ * 并对结果进行分类。连接随后立即关闭——目标是可达性，而不是载荷交换。</p>
  *
- * <p>Design notes:</p>
+ * <p>设计说明：</p>
  * <ul>
- *   <li><b>DNS is measured and bounded separately.</b> {@link InetAddress#getAllByName} can block
- *       far longer than the connect timeout, and it is not subject to it. A lookup is therefore
- *       run through {@link DnsResolver} with its own budget, and reported as {@code dnsMs} so that
- *       "slow resolver" stays distinguishable from "slow network".</li>
- *   <li><b>Every resolved address is tried.</b> A host with several A/AAAA records, one of which is
- *       filtered, still reports {@code CONNECTED} when another address answers. The per-address
- *       connect timeout equals the requested timeout, so the worst case is
- *       {@code addresses × timeout}; batch-level deadlines cut that off.</li>
- *   <li><b>No retries.</b> Retrying inside the probe would blur the latency measurement; callers
- *       who need retries can re-submit the task, which keeps the API honest.</li>
+ *   <li><b>DNS 的测量与限时都独立进行。</b>{@link InetAddress#getAllByName} 的阻塞时间可能远超连接超时，
+ *       而且不受该超时约束。因此一次查找会通过 {@link DnsResolver} 在自带预算下执行，并作为 {@code dnsMs}
+ *       上报，从而让“解析器慢”与“网络慢”保持可区分。</li>
+ *   <li><b>每个解析出的地址都会被尝试。</b>一个拥有多条 A/AAAA 记录的主机，即使其中一条被过滤，
+ *       只要另一个地址有响应，仍会报告 {@code CONNECTED}。每个地址的连接超时等于请求的超时，
+ *       因此最坏情况是 {@code addresses × timeout}；批量级截止时间会将其截断。</li>
+ *   <li><b>不重试。</b>在探测器内部重试会模糊延迟测量；需要重试的调用方可以重新提交任务，
+ *       这样能让 API 保持诚实。</li>
  * </ul>
  */
 public final class TcpProber {
 
-    /** How many resolved addresses are attempted before giving up. */
+    /** 放弃前最多尝试多少个已解析出的地址。 */
     private static final int MAX_ADDRESS_ATTEMPTS = 4;
 
     /**
-     * @param connectTimeoutMs default handshake timeout, used when a caller does not override it
+     * @param connectTimeoutMs 默认握手超时，在调用方未覆盖时使用
      */
     public TcpProber(int connectTimeoutMs) {
         this(connectTimeoutMs, new DnsResolver(8), 2000);
     }
 
     /**
-     * @param connectTimeoutMs default handshake timeout
-     * @param resolver         owned by the prober; {@link #close()} shuts it down
-     * @param dnsTimeoutMs     budget for one name lookup
+     * @param connectTimeoutMs 默认握手超时
+     * @param resolver         由探测器持有；{@link #close()} 会将其关闭
+     * @param dnsTimeoutMs     一次域名查找的预算
      */
     public TcpProber(int connectTimeoutMs, DnsResolver resolver, int dnsTimeoutMs) {
         if (connectTimeoutMs < 1) {
@@ -76,7 +72,7 @@ public final class TcpProber {
         return dnsTimeoutMs;
     }
 
-    /** Releases the resolver pool; the prober must not be used afterwards. */
+    /** 释放解析器线程池；此后不得再使用该探测器。 */
     public void close() {
         resolver.close();
     }
@@ -86,8 +82,8 @@ public final class TcpProber {
     }
 
     /**
-     * Probes {@code target} and never throws: every failure mode is mapped onto a
-     * {@link ProbeStatus} so that a batch of targets always yields a result per target.
+     * 探测 {@code target} 且从不抛异常：每一种失败模式都会被映射到一个 {@link ProbeStatus}，
+     * 因此一批目标总能得到每个目标各自的结果。
      */
     public ProbeResult probe(ProbeTarget target, int connectTimeoutMs) {
         if (connectTimeoutMs < 1) {
@@ -133,8 +129,7 @@ public final class TcpProber {
                 lastStatus = classifySocketException(e);
                 lastDetail = safeMessage(e);
                 if (lastStatus == ProbeStatus.REFUSED) {
-                    // A refused connection already proves the host is reachable; no point in
-                    // burning the remaining timeout on the other addresses of the same name.
+                    // 连接被拒绝已经证明主机可达；没必要把剩余超时浪费在同一个名字的其他地址上。
                     break;
                 }
             } catch (IOException e) {
@@ -145,12 +140,12 @@ public final class TcpProber {
                 lastDetail = e.getClass().getSimpleName() + ": " + safeMessage(e);
             }
         }
-        // At least one address has been attempted (getAllByName never returns an empty array).
+        // 至少已尝试过一个地址（getAllByName 从不返回空数组）。
         return ProbeResult.of(target, lastStatus == null ? ProbeStatus.ERROR : lastStatus,
                 null, literal ? null : dnsMs, lastDetail);
     }
 
-    /** Maps a socket-level failure onto the API-visible status. Visible for tests. */
+    /** 把套接字层面的失败映射为 API 可见的状态。对测试可见。 */
     static ProbeStatus classifySocketException(SocketException e) {
         String msg = e.getMessage() == null ? "" : e.getMessage().toLowerCase(Locale.ROOT);
         if (e instanceof ConnectException

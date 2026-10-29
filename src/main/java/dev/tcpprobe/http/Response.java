@@ -3,7 +3,7 @@ package dev.tcpprobe.http;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/** Mutable response accumulator filled in by a {@link Handler}. */
+/** 由 {@link Handler} 填充的可变响应累加器。 */
 public final class Response {
 
     private int status = 200;
@@ -34,7 +34,7 @@ public final class Response {
         return this;
     }
 
-    /** Sets a JSON payload; {@link dev.tcpprobe.json.Json#write(Object)} renders it later. */
+    /** 设置 JSON 响应体；稍后由 {@link dev.tcpprobe.json.Json#write(Object)} 渲染。 */
     public Response json(int newStatus, Object body) {
         this.status = newStatus;
         this.payload = body;

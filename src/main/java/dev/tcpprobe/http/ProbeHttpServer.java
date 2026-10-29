@@ -28,13 +28,11 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * HTTP front end: binds the JDK's built-in {@link HttpServer}, registers the routes and owns the
- * cross-cutting concerns every endpoint shares — request ids, timing, error-to-JSON mapping,
- * metrics and logging.
+ * HTTP 前端：绑定 JDK 自带的 {@link HttpServer}，注册路由，并负责每个端点共享的横切关注点
+ * ——请求 id、计时、错误到 JSON 的映射、指标与日志。
  *
- * <p>Using the JDK server instead of an external framework is a deliberate trade-off: it is the only
- * HTTP server that is guaranteed to be there (no artifact download behind a corporate proxy), and
- * the API here is small enough that a router is all the framework we need.</p>
+ * <p>使用 JDK 自带的服务器而不是外部框架是刻意的取舍：它是唯一保证存在的 HTTP 服务器
+ * （无需在企业代理后面下载 artifact），而这里的 API 足够小，一个路由器就构成了我们需要的全部框架。</p>
  */
 public final class ProbeHttpServer implements AutoCloseable {
 
@@ -71,7 +69,7 @@ public final class ProbeHttpServer implements AutoCloseable {
         return this;
     }
 
-    /** Actual bound port; useful when {@code server.port=0} was requested. */
+    /** 实际绑定的端口；在请求了 {@code server.port=0} 时有用。 */
     public int port() {
         HttpServer current = server;
         return current == null ? -1 : current.getAddress().getPort();
@@ -87,8 +85,8 @@ public final class ProbeHttpServer implements AutoCloseable {
         metrics.httpRequest();
 
         int status = 500;
-        // Built before dispatch so failures raised while *reading the request*
-        // (413 body too large, 400 bad query) can still be rendered as JSON.
+        // 在分发之前构建，这样在*读取请求*期间抛出的失败
+        //（413 请求体过大、400 查询参数错误）仍然能渲染成 JSON。
         Response response = new Response();
         try {
             try {
@@ -108,7 +106,7 @@ public final class ProbeHttpServer implements AutoCloseable {
             metrics.httpBadRequest();
             writeError(exchange, 400, "MALFORMED_JSON", e.getMessage());
         } catch (IOException e) {
-            // The client hung up (or the body could not be read). Nobody left to answer to.
+            // 客户端已断开（或请求体无法读取）。已经没有需要回复的对象了。
             status = 499;
             Log.debug("client disconnected during %s %s: %s", method, path, e.getMessage());
         } catch (Exception e) {
@@ -165,7 +163,7 @@ public final class ProbeHttpServer implements AutoCloseable {
     private static void writeError(HttpExchange exchange, int status, String code, String message) {
         try {
             if (exchange.getResponseCode() != -1) {
-                return; // someone already started the response
+                return; // 已经有人开始写响应了
             }
             Map<String, Object> body = new java.util.LinkedHashMap<>();
             Map<String, Object> error = new java.util.LinkedHashMap<>();
@@ -180,7 +178,7 @@ public final class ProbeHttpServer implements AutoCloseable {
         }
     }
 
-    /** Graceful stop: {@code delaySeconds} lets in-flight exchanges finish before the socket closes. */
+    /** 优雅停止：{@code delaySeconds} 让在途的 exchange 在 socket 关闭之前完成。 */
     public void stop(int delaySeconds) {
         HttpServer current = server;
         if (current != null) {

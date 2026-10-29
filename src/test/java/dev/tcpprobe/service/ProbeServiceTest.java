@@ -36,7 +36,7 @@ class ProbeServiceTest {
         Thread acceptor = new Thread(() -> {
             while (!listener.isClosed()) {
                 try (Socket accepted = listener.accept()) {
-                    // the probe only needs the handshake
+                    // 探测只需要握手完成
                     accepted.getRemoteSocketAddress();                } catch (IOException e) {
                     return;
                 }

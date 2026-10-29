@@ -4,15 +4,15 @@ import java.util.Locale;
 import java.util.regex.Pattern;
 
 /**
- * A single TCP endpoint to probe: {@code host:port}.
+ * 单个待探测的 TCP 端点：{@code host:port}。
  *
- * <p>Only the bare {@code host:port} form is accepted. Accepting a URL here would invite
- * ambiguity ("is it http or https?"), so the API keeps the smallest possible surface and the
- * caller decides which port carries the service.</p>
+ * <p>只接受最朴素的 {@code host:port} 形式。在这里接受 URL 会引入歧义
+ * （“是 http 还是 https？”），因此 API 只保留尽可能小的接口面，
+ * 由调用方决定哪个端口承载服务。</p>
  */
 public record ProbeTarget(String host, int port) {
 
-    /** Hostnames: letters, digits, dot, dash, underscore; IP literals are validated by the resolver. */
+    /** 主机名：字母、数字、点、连字符、下划线；IP 字面量由解析器校验。 */
     private static final Pattern HOST_PATTERN = Pattern.compile("^[A-Za-z0-9._:%-]+$");
     private static final int MAX_HOST_LENGTH = 253;
 
@@ -35,7 +35,7 @@ public record ProbeTarget(String host, int port) {
         }
     }
 
-    /** Canonical form used as map key and in the API payload, e.g. {@code example.com:443} or {@code [::1]:80}. */
+    /** 规范形式，用作映射键并出现在 API 载荷中，例如 {@code example.com:443} 或 {@code [::1]:80}。 */
     public String display() {
         return (host.indexOf(':') >= 0 ? "[" + host + "]" : host) + ":" + port;
     }
@@ -45,7 +45,7 @@ public record ProbeTarget(String host, int port) {
         return display();
     }
 
-    /** Parses {@code host:port}, {@code [ipv6]:port} and {@code ipv4:port}. */
+    /** 解析 {@code host:port}、{@code [ipv6]:port} 与 {@code ipv4:port}。 */
     public static ProbeTarget parse(String raw) {
         if (raw == null) {
             throw new IllegalArgumentException("target must not be null");

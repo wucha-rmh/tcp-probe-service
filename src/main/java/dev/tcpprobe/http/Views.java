@@ -12,12 +12,11 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * JSON projections of the domain objects.
+ * 领域对象的 JSON 投影。
  *
- * <p>Kept apart from both the domain records and the HTTP plumbing so the wire format can evolve
- * (rename a field, hide an internal one) without touching either. Results are only emitted once a
- * task has finished: partial results would tempt callers into treating a half-filled batch as
- * final, and the completion signal is unambiguous.</p>
+ * <p>与领域 record 和 HTTP 基础设施都保持分离，这样线上格式可以独立演进
+ * （重命名字段、隐藏内部字段）而不必改动二者。只有在任务完成后才会输出结果：
+ * 部分结果会让调用方误把一个只填了一半的批量当作最终结果，而完成信号是明确的。</p>
  */
 public final class Views {
 

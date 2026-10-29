@@ -25,18 +25,18 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Executes probe batches in the background and records their results as {@link ProbeTask}s.
+ * 在后台执行探测批次，并把结果记录为 {@link ProbeTask}。
  *
- * <p>Concurrency model:</p>
+ * <p>并发模型：</p>
  * <ul>
- *   <li>{@code taskWorkers} platform threads run whole batches. A batch blocks while waiting for its
- *       probes, so this also bounds how many batches are in flight.</li>
- *   <li>{@code maxProbesInFlight} threads form the probe pool. The pool queue is the natural
- *       back-pressure: with many batches the queue grows, and the per-batch deadline turns starving
- *       probes into {@code TIMEOUT} results instead of unbounded latency.</li>
- *   <li>{@code maxConcurrentTasks} permits are grabbed at submission time. When they run out the
- *       API answers {@code 503 SERVER_BUSY}, which is an honest "come back later" signal rather
- *       than a silent queue that ages into timeouts.</li>
+ *   <li>{@code taskWorkers} 个平台线程运行整个批次。一个批次在等待其探测时会阻塞，因此这也
+ *       限制了在途批次的个数。</li>
+ *   <li>{@code maxProbesInFlight} 个线程组成探测池。池队列本身就是天然的背压：批次一多，
+ *       队列就会增长，而按批次的截止时间会把长期得不到执行的探测变成 {@code TIMEOUT}
+ *       结果，而不是无上限增长的延迟。</li>
+ *   <li>{@code maxConcurrentTasks} 个许可在提交时获取。许可耗尽时，API 返回
+ *       {@code 503 SERVER_BUSY}，这是一个诚实的“稍后再来”信号，而不是一个悄悄排队直到
+ *       老化成超时的队列。</li>
  * </ul>
  */
 public final class ProbeService {
@@ -60,9 +60,9 @@ public final class ProbeService {
     }
 
     /**
-     * Validates nothing and schedules everything: handlers have already validated the targets.
+     * 不做任何校验，直接排期：处理器已经校验过目标。
      *
-     * @throws ApiException {@code 503 SERVER_BUSY} when the task slot budget is exhausted
+     * @throws ApiException 当任务槽位预算耗尽时抛出 {@code 503 SERVER_BUSY}
      */
     public ProbeTask submit(List<ProbeTarget> targets, int timeoutMs, ProbeTask.Mode mode) {
         if (targets == null || targets.isEmpty()) {
@@ -98,8 +98,7 @@ public final class ProbeService {
     }
 
     /**
-     * Runs one batch. Package visibility keeps the execution detail inside the service while still
-     * letting tests drive a batch synchronously.
+     * 运行一个批次。包级可见性使执行细节留在服务内部，同时仍然允许测试同步驱动一个批次。
      */
     void execute(ProbeTask task) {
         task.markRunning();
@@ -164,7 +163,7 @@ public final class ProbeService {
         return registry.get(taskId);
     }
 
-    /** Evicts expired tasks and idle rate-limiter state; called periodically by the scheduler. */
+    /** 驱逐已过期的任务和空闲的限流器状态；由调度器周期性调用。 */
     public int evictExpired() {
         int removed = registry.evictFinishedOlderThan(Duration.ofSeconds(config.taskTtlSeconds()));
         metrics.taskExpired(removed);
@@ -192,7 +191,7 @@ public final class ProbeService {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         } finally {
-            // The service owns the prober, which in turn owns the DNS resolver pool.
+            // 服务拥有 prober，而 prober 又拥有 DNS resolver 池。
             prober.close();
         }
     }

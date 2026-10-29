@@ -7,15 +7,15 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Minimal strict JSON codec (RFC 8259) used for both request parsing and response rendering.
+ * 极简的严格 JSON 编解码器（RFC 8259），同时用于请求解析与响应渲染。
  *
- * <p>Design notes:</p>
+ * <p>设计说明：</p>
  * <ul>
- *   <li>The parser is a recursive-descent scanner with an explicit depth limit and precise
- *       offsets in error messages, which makes 400 responses actionable for API clients.</li>
- *   <li>Rendering accepts plain Java objects ({@code Map}, {@code Iterable}, {@code String},
- *       {@code Number}, {@code Boolean}, {@code null}) so handlers can build payloads directly
- *       without a mapping library.</li>
+ *   <li>解析器是一个递归下降扫描器，带有显式的嵌套深度限制，并在错误消息中给出精确的
+ *       偏移量，这让 400 响应对 API 客户端具有可操作性。</li>
+ *   <li>渲染接受普通 Java 对象（{@code Map}、{@code Iterable}、{@code String}、
+ *       {@code Number}、{@code Boolean}、{@code null}），因此各 handler 无需映射库
+ *       就能直接构建 payload。</li>
  * </ul>
  */
 public final class Json {
@@ -25,7 +25,7 @@ public final class Json {
     private Json() {
     }
 
-    // ------------------------------------------------------------------ parsing
+    // ------------------------------------------------------------------ 解析
 
     public static JsonValue parse(String text) {
         if (text == null) {
@@ -263,9 +263,9 @@ public final class Json {
         }
     }
 
-    // ------------------------------------------------------------------ rendering
+    // ------------------------------------------------------------------ 渲染
 
-    /** Renders any supported Java value as a JSON string. */
+    /** 把任意受支持的 Java 值渲染为 JSON 字符串。 */
     public static String write(Object value) {
         StringBuilder sb = new StringBuilder(256);
         writeValue(sb, value);
@@ -367,7 +367,7 @@ public final class Json {
         }
         double d = n.doubleValue();
         if (!Double.isFinite(d)) {
-            // JSON has no NaN/Infinity representation; null keeps the document valid.
+            // JSON 没有 NaN/Infinity 的表示形式；用 null 可以保持文档合法。
             sb.append("null");
             return;
         }
@@ -402,9 +402,9 @@ public final class Json {
         sb.append('"');
     }
 
-    // ------------------------------------------------------------------ helpers
+    // ------------------------------------------------------------------ 辅助方法
 
-    /** Builds an ordered map from alternating key/value pairs; handy for response payloads. */
+    /** 由交替出现的 key/value 对构建有序 map；用来构建响应 payload 很方便。 */
     public static Map<String, Object> map(Object... kv) {
         if (kv.length % 2 != 0) {
             throw new IllegalArgumentException("map() requires an even number of arguments");

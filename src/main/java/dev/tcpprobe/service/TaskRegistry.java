@@ -6,11 +6,10 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * In-memory store of submitted tasks.
+ * 已提交任务的内存存储。
  *
- * <p>Tasks are kept for a bounded time ({@code task.ttl-seconds}) so that a client can submit and
- * poll later, and the map is capped so that a burst of submissions cannot exhaust the heap.
- * Eviction prefers finished tasks, oldest first.</p>
+ * <p>任务只保留有限时间（{@code task.ttl-seconds}），这样客户端可以先提交、稍后再轮询；
+ * 同时 map 有容量上限，一波突发提交不会耗尽堆内存。驱逐时优先选择已结束的任务，最旧的先出。</p>
  */
 public final class TaskRegistry {
 
@@ -39,7 +38,7 @@ public final class TaskRegistry {
         return tasks.size();
     }
 
-    /** Removes finished tasks whose completion time is older than {@code ttl}. */
+    /** 删除结束时间早于 {@code ttl} 的已结束任务。 */
     public int evictFinishedOlderThan(Duration ttl) {
         Instant cutoff = Instant.now().minus(ttl);
         int removed = 0;
@@ -62,8 +61,8 @@ public final class TaskRegistry {
         }
         tasks.values().stream()
                 .filter(ProbeTask::isFinished)
-                // created-at ties are common (same millisecond); the id tie-break keeps eviction
-                // deterministic instead of depending on hash-map iteration order
+                // 创建时间相同很常见（同一毫秒）；再用 id 做并列时的取舍，让驱逐保持确定性，
+                // 而不是依赖 hash-map 的迭代顺序。
                 .sorted(java.util.Comparator.comparing(ProbeTask::createdAt).thenComparing(ProbeTask::id))
                 .limit(count)
                 .forEach(t -> tasks.remove(t.id(), t));

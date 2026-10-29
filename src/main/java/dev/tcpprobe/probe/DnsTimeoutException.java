@@ -1,6 +1,6 @@
 package dev.tcpprobe.probe;
 
-/** Raised when name resolution exceeds its budget; mapped by the prober onto a {@code TIMEOUT}. */
+/** 当域名解析超出预算时抛出；由探测器映射为 {@code TIMEOUT}。 */
 public class DnsTimeoutException extends Exception {
 
     @java.io.Serial

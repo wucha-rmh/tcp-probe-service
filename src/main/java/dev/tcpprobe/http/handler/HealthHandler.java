@@ -9,7 +9,7 @@ import dev.tcpprobe.service.Metrics;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/** {@code GET /healthz}: process liveness only, so it stays cheap under load. */
+/** {@code GET /healthz}：只检查进程存活，因此在负载下依然开销很低。 */
 public final class HealthHandler implements Handler {
 
     private final Config config;

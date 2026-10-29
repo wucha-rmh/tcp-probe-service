@@ -21,7 +21,7 @@
   </properties>
 
   <dependencies>
-    <!-- Runtime dependencies: intentionally none. The service only uses the JDK. -->
+    <!-- 运行时依赖：故意留空。这个服务只使用 JDK 自带的能力。 -->
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>

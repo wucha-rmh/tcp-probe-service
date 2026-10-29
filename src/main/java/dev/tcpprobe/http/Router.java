@@ -10,9 +10,9 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Small pattern router: {@code /api/v1/probes/{taskId}} style templates, exact method matching and
- * correct 404 / 405 distinction. No reflection, no annotation scanning — explicit registration in
- * {@link ProbeHttpServer} keeps the full API surface readable in one place.
+ * 小型模式路由：支持 {@code /api/v1/probes/{taskId}} 风格的模板、精确的 method 匹配，
+ * 以及正确的 404 / 405 区分。不使用反射，也不扫描注解——在
+ * {@link ProbeHttpServer} 中显式注册，使完整的 API 面貌能在一处读清楚。
  */
 public final class Router {
 

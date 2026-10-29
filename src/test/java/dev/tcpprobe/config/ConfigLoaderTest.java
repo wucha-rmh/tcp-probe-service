@@ -111,7 +111,7 @@ class ConfigLoaderTest {
     @Test
     void configFlagSelectsAnAlternativeFile() throws IOException {
         Files.writeString(properties, "server.port=9400\n");
-        // Both spellings must work, and the flag itself must not be rejected as an unknown key.
+        // 两种写法都必须可用，而且这个 flag 本身不能被当成未知 key 拒绝。
         Config fromEquals = ConfigLoader.load(new String[]{"--config=" + properties, "--server.port=9401"});
         assertEquals(9401, fromEquals.port());
 

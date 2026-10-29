@@ -22,9 +22,9 @@ import java.util.concurrent.TimeUnit;
 /**
  * {@code POST /api/v1/probes}.
  *
- * <p>Body: {@code {"targets": ["example.com:443", {"host": "10.0.0.1", "port": 22}],
- * "timeoutMs": 2000, "mode": "async"}}. Targets are validated one by one and every failure is
- * reported at once, so a client does not have to round-trip per bad entry.</p>
+ * <p>请求体：{@code {"targets": ["example.com:443", {"host": "10.0.0.1", "port": 22}],
+ * "timeoutMs": 2000, "mode": "async"}}。目标会逐个校验，所有失败会一次性上报，
+ * 这样客户端不必为每个错误条目各自往返一次。</p>
  */
 public final class SubmitProbeHandler implements Handler {
 
@@ -184,7 +184,7 @@ public final class SubmitProbeHandler implements Handler {
         try {
             task.completion().get(config.syncMaxWaitMs(), TimeUnit.MILLISECONDS);
         } catch (java.util.concurrent.TimeoutException e) {
-            // The task keeps running; the caller gets 202 and the taskId to poll.
+            // 任务继续运行；调用方拿到 202 以及可用于轮询的 taskId。
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw ApiException.internal("interrupted while waiting for the probe task");

@@ -26,7 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** End-to-end tests over a real socket: the only way to prove routing, JSON and HTTP codes agree. */
+/** 基于真实 socket 的端到端测试：这是唯一能证明路由、JSON 与 HTTP 状态码彼此一致的办法。 */
 class ApiIntegrationTest {
 
     private Harness harness;
@@ -184,7 +184,7 @@ class ApiIntegrationTest {
         return obj(response).get("error").asObj().get("code").asString();
     }
 
-    /** Runs one server plus a local listener that always accepts, so CONNECTED is reproducible. */
+    /** 启动一个服务器，外加一个始终接受连接的本地 listener，使 CONNECTED 可复现。 */
     private static final class Harness implements AutoCloseable {
 
         private final ServerSocket listener;
@@ -199,7 +199,7 @@ class ApiIntegrationTest {
             Thread acceptor = new Thread(() -> {
                 while (!listener.isClosed()) {
                     try (Socket accepted = listener.accept()) {
-                        // handshake is enough
+                        // 握手足够
                         accepted.getRemoteSocketAddress();
                     } catch (IOException e) {
                         return;
@@ -276,7 +276,7 @@ class ApiIntegrationTest {
             try {
                 listener.close();
             } catch (IOException ignored) {
-                // nothing to do
+                // 无需处理
             }
         }
     }

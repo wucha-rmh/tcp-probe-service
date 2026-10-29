@@ -20,12 +20,12 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-/** Entry point: wires configuration, the probe service and the HTTP server together. */
+/** 入口：把配置、探测服务与 HTTP 服务器装配在一起。 */
 public final class App {
 
-    /** How often expired tasks and idle rate-limit buckets are swept. */
+    /** 多久清理一次已过期任务与空闲的限流令牌桶。 */
     private static final long JANITOR_INTERVAL_SECONDS = 30;
-    /** Idle time after which a client's rate-limit bucket is forgotten. */
+    /** 客户端限流令牌桶在该空闲时间之后被遗忘。 */
     private static final long RATE_LIMIT_IDLE_SECONDS = 600;
 
     public static void main(String[] args) {
@@ -45,10 +45,10 @@ public final class App {
         }
 
         Metrics metrics = new Metrics();
-        // One bounded resolver pool shared by every probe; the prober (and thus ProbeService) owns it.
+        // 所有探测共享一个限定大小的解析器线程池；由探测器（因而也就是 ProbeService）持有。
         TcpProber prober = new TcpProber(config.probeTimeoutMs(),
                 new DnsResolver(Math.max(4, config.maxProbesInFlight())), config.probeDnsTimeoutMs());
-        // Generous cap: finished tasks are evicted by TTL anyway, this only bounds pathological bursts.
+        // 上限给得宽松：已完成的任务本来就会按 TTL 驱逐，这里只用于约束病态突发。
         TaskRegistry registry = new TaskRegistry(Math.max(1024, config.maxConcurrentTasks() * 32));
         ProbeService service = new ProbeService(config, prober, registry, metrics);
         RateLimiter rateLimiter = new RateLimiter(
