@@ -11,12 +11,23 @@
 - **两级令牌桶限流**：全局 + 按客户端 IP，拒绝时返回 `429` 和 `Retry-After`。
 - **异步任务 + 长轮询**：`async` 提交立即返回 `202`，`sync` 只是在同一条执行路径上等结果。
 
+## 目录
+
+- [快速开始](#快速开始)
+- [验证](#验证)
+- [探测是怎么做的](#探测是怎么做的)
+- [API](#api)
+- [配置](#配置)
+- [代码结构](#代码结构)
+- [测试](#测试)
+- [取舍](#取舍)
+
 ## 快速开始
 
 需要 JDK 21+ 与 Maven 3.9+。
 
 ```bash
-git clone <this-repo>
+git clone https://github.com/wucha-rmh/tcp-probe-service.git
 cd tcp-probe-service
 mvn -q clean package          # 产物 target/tcp-probe-service.jar（Spring Boot 可执行 jar）
 java -jar target/tcp-probe-service.jar
@@ -46,17 +57,24 @@ JSON
 curl -s -H 'Content-Type: application/json' --data-binary @/tmp/batch.json localhost:8080/api/v1/probes
 ```
 
-期望看到四个结果，状态依次是 `CONNECTED`、`REFUSED`、`TIMEOUT`、`TIMEOUT`（最后一条的 `detail` 是
-`dns resolution timed out after 2000 ms`），整批约 2 秒返回，`summary` 里是各状态计数：
+期望四个结果依次是 `CONNECTED`（握手成功）、`REFUSED`（端口没开）、`TIMEOUT`（连接没回应）、
+`UNRESOLVED`（域名不存在）。最后一条取决于 DNS 的响应速度：解析器很快给出否定答案时是 `UNRESOLVED`
+（`unknown host: ...`），解析卡住超过 `probe.dns-timeout-ms` 则是 `TIMEOUT`
+（`dns resolution timed out after 2000 ms`）——本机两种都复现过，这不是不确定，而是同一个超时预算下的两个分支。
+
+整批约 2 秒返回（`timeout-ms` 2000 + 一次性 DNS），`summary` 是各状态计数：
 
 ```json
-{"taskId":"p_bc7edb20f2454f10","status":"SUCCEEDED","mode":"sync",
- "summary":{"connected":1,"refused":1,"timeout":2,"unresolved":0,"unreachable":0,"error":0,"averageLatencyMs":228.0},
- "results":[{"target":"example.com:443","status":"CONNECTED","latencyMs":228,"dnsMs":262},
-            {"target":"127.0.0.1:1","status":"REFUSED","latencyMs":null,"detail":"Connection refused: getsockopt"},
-            {"target":"192.0.2.1:9","status":"TIMEOUT","latencyMs":null,"detail":"connect timed out after 1999 ms"},
-            {"target":"no-such-host.invalid:80","status":"TIMEOUT","latencyMs":null,
-             "detail":"dns resolution timed out after 2000 ms"}]}
+{"taskId":"p_ab405a2012704d97","status":"SUCCEEDED","mode":"sync",
+ "createdAt":"2026-10-29T12:09:38.718Z","finishedAt":"2026-10-29T12:09:40.720Z","timeoutMs":2000,"targetCount":4,
+ "summary":{"connected":1,"refused":1,"timeout":1,"unresolved":1,"unreachable":0,"error":0,"averageLatencyMs":226.0},
+ "results":[{"target":"example.com:443","host":"example.com","port":443,"status":"CONNECTED","latencyMs":226,"dnsMs":59},
+            {"target":"127.0.0.1:1","host":"127.0.0.1","port":1,"status":"REFUSED","latencyMs":null,"dnsMs":null,
+             "detail":"Connection refused: getsockopt"},
+            {"target":"192.0.2.1:9","host":"192.0.2.1","port":9,"status":"TIMEOUT","latencyMs":null,"dnsMs":null,
+             "detail":"connect timed out after 1999 ms"},
+            {"target":"no-such-host.invalid:80","host":"no-such-host.invalid","port":80,"status":"UNRESOLVED",
+             "latencyMs":null,"dnsMs":null,"detail":"unknown host: no-such-host.invalid"}]}
 ```
 
 ```bash
@@ -115,7 +133,8 @@ curl -s localhost:8080/api/v1/stats
 | `GET` | `/api/v1/stats` | 进程内计数器 |
 | `GET` | `/healthz` | 存活探针，只查内存 |
 
-每个请求留一行日志：`POST /api/v1/probes -> 200 (488 ms)`（5xx 为 WARN）。
+每个请求留一行日志：`POST /api/v1/probes -> 200 (488 ms)`（5xx 为 WARN）。演示用的话术和排错清单见
+[DEMO.md](DEMO.md)。
 
 请求体：
 
@@ -177,6 +196,8 @@ src/main/java/dev/tcpprobe/
 ```bash
 mvn -q test      # 49 个用例，约 3 秒
 ```
+
+> 首次运行需要联网（Maven 要下载 surefire 的 JUnit Platform provider）；依赖已在本地仓库时可直接 `mvn -o test`。
 
 覆盖：`ProbeTarget` 的 11 种非法输入、`TcpProber` 对真监听端口/关闭端口/不存在的域名/DNS 卡死的判定、
 `ProbeService` 的顺序保持与并发上限、`RateLimiter` 的回填与全局/客户端隔离，以及 13 个端到端 HTTP 用例
