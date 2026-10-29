@@ -115,6 +115,8 @@ curl -s localhost:8080/api/v1/stats
 | `GET` | `/api/v1/stats` | 进程内计数器 |
 | `GET` | `/healthz` | 存活探针，只查内存 |
 
+每个请求留一行日志：`POST /api/v1/probes -> 200 (488 ms)`（5xx 为 WARN）。
+
 请求体：
 
 ```json
