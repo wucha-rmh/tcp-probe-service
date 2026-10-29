@@ -41,6 +41,9 @@ public final class RateLimiter {
     private final long sweepIntervalNanos;
     private final long idleSeconds;
     private final AtomicLong lastSweepNanos = new AtomicLong(System.nanoTime());
+    private final AtomicLong denied = new AtomicLong();
+    private final AtomicLong deniedByGlobal = new AtomicLong();
+    private final AtomicLong deniedByClient = new AtomicLong();
 
     /** 交给 Spring 用这个构造器注入；测试用下面的包内构造器调整清理策略。 */
     @Autowired
@@ -66,13 +69,32 @@ public final class RateLimiter {
         sweepIdleClients();
         String key = clientKey == null || clientKey.isBlank() ? "-" : clientKey;
         if (!global.tryAcquire()) {
+            denied.incrementAndGet();
+            deniedByGlobal.incrementAndGet();
             return new Decision(false, "global", global.secondsUntilNextToken(), 0);
         }
         Bucket bucket = clients.computeIfAbsent(key, ignored -> new Bucket(clientBurst, clientRps));
         if (!bucket.tryAcquire()) {
+            denied.incrementAndGet();
+            deniedByClient.incrementAndGet();
             return new Decision(false, "client", bucket.secondsUntilNextToken(), 0);
         }
         return new Decision(true, null, 0, (int) Math.floor(bucket.available()));
+    }
+
+    /** 累计被拒（429）的次数。 */
+    public long deniedRequests() {
+        return denied.get();
+    }
+
+    /** 其中被全局桶拒掉的次数。 */
+    public long deniedByGlobal() {
+        return deniedByGlobal.get();
+    }
+
+    /** 其中被客户端桶拒掉的次数。 */
+    public long deniedByClient() {
+        return deniedByClient.get();
     }
 
     /**

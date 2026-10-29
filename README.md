@@ -32,7 +32,7 @@ java -jar target/tcp-probe-service.jar --server.port=9000 --probe.timeout-ms=100
 | --- | --- | --- |
 | `POST` | `/api/v1/probes` | 提交批量探测；已完成返回 `200`，已受理返回 `202`（响应头带 `Location`） |
 | `GET` | `/api/v1/probes/{taskId}?waitMs=0..10000` | 查询任务，`waitMs` 为最长轮询等待 |
-| `GET` | `/api/v1/stats` | 进程内计数器：任务（`submitted`/`running`/`succeeded`/`failed`/`rejectedBusy`/`stored`）、探测（六种状态 + `attempted`/`inFlight`）、`rateLimitedClients` |
+| `GET` | `/api/v1/stats` | 进程内计数器：任务（`submitted`/`running`/`succeeded`/`failed`/`rejectedBusy`/`stored`）、探测（六种状态 + `attempted`/`inFlight`）、限流（`rateLimit.denied` 及按桶拆分的 `global`/`client`）、`rateLimitedClients`（当前跟踪的客户端桶数量） |
 | `GET` | `/healthz` | 存活检查，只读内存不探测 |
 | `GET` | `/` | 自描述索引 |
 

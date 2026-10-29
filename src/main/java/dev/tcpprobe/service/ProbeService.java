@@ -195,6 +195,13 @@ public class ProbeService {
         Map<String, Object> stats = new LinkedHashMap<>();
         stats.put("tasks", tasksView);
         stats.put("probes", probesView);
+
+        Map<String, Object> rateLimitView = new LinkedHashMap<>();
+        rateLimitView.put("denied", rateLimiter.deniedRequests());
+        rateLimitView.put("global", rateLimiter.deniedByGlobal());
+        rateLimitView.put("client", rateLimiter.deniedByClient());
+        stats.put("rateLimit", rateLimitView);
+        // 保留旧字段：它是「当前跟踪的客户端桶数量」，和拒绝次数是两回事。
         stats.put("rateLimitedClients", rateLimiter.trackedClients());
         return stats;
     }

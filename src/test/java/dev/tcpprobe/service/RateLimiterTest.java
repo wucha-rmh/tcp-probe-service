@@ -6,6 +6,23 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class RateLimiterTest {
 
+    @Test
+    void countsDenialsPerBucket() {
+        RateLimiter clientLimited = limiter(0.2, 1, 1000, 1000);
+        assertThat(clientLimited.acquire("10.0.0.1").allowed()).isTrue();
+        assertThat(clientLimited.acquire("10.0.0.1").allowed()).isFalse();
+        assertThat(clientLimited.deniedRequests()).isEqualTo(1);
+        assertThat(clientLimited.deniedByClient()).isEqualTo(1);
+        assertThat(clientLimited.deniedByGlobal()).isZero();
+
+        RateLimiter globalLimited = limiter(1000, 1000, 0.2, 1);
+        assertThat(globalLimited.acquire("10.0.0.1").allowed()).isTrue();
+        assertThat(globalLimited.acquire("10.0.0.2").allowed()).isFalse();
+        assertThat(globalLimited.deniedRequests()).isEqualTo(1);
+        assertThat(globalLimited.deniedByGlobal()).isEqualTo(1);
+        assertThat(globalLimited.deniedByClient()).isZero();
+    }
+
     private static RateLimiter limiter(double clientRps, int clientBurst, double globalRps, int globalBurst) {
         return new RateLimiter(new dev.tcpprobe.ProbeProperties(
                 2000, 2000, 8, 200, 16, 2, 600, 30000, 1048576,

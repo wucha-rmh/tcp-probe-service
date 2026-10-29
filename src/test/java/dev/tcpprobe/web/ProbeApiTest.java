@@ -206,7 +206,7 @@ class ProbeApiTest {
         ResponseEntity<Map<String, Object>> stats =
                 rest.exchange("/api/v1/stats", HttpMethod.GET, null, JSON);
         assertThat(stats.getStatusCode().value()).isEqualTo(200);
-        assertThat(stats.getBody()).containsKeys("tasks", "probes");
+        assertThat(stats.getBody()).containsKeys("tasks", "probes", "rateLimit", "rateLimitedClients");
     }
 
     private ResponseEntity<Map<String, Object>> post(String body) {
