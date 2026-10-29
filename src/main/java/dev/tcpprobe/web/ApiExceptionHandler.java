@@ -34,6 +34,8 @@ public class ApiExceptionHandler {
         ResponseEntity.BodyBuilder builder = ResponseEntity.status(e.status());
         if (e.retryAfterSeconds() != null) {
             builder.header(HttpHeaders.RETRY_AFTER, String.valueOf(e.retryAfterSeconds()));
+            // 被限流时额度就是 0，补上这个头，调用方不用区分「放行」和「拒绝」两种响应头组合。
+            builder.header("X-RateLimit-Remaining", "0");
         }
         return builder.body(error(e.status(), e.code(), e.getMessage(), e.details()));
     }
