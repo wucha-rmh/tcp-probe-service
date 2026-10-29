@@ -119,8 +119,10 @@ curl -s "http://localhost:8080/api/v1/probes/$ID?waitMs=5000"
 | `probe.task-ttl-seconds` | 600 | 已完成任务在内存中的保留时长 |
 | `probe.sync-max-wait-ms` | 30000 | `sync` 模式最长等待时间 |
 | `probe.max-body-bytes` | 1048576 | 请求体上限，超出返回 413 |
-| `probe.rate-limit.global.*` | 50 rps / 100 | 全局令牌桶速率与突发容量 |
-| `probe.rate-limit.client.*` | 10 rps / 20 | 单客户端令牌桶速率与突发容量 |
+| `probe.rate-limit.global-rps` | 50.0 | 全局令牌桶速率（requests/second） |
+| `probe.rate-limit.global-burst` | 100 | 全局令牌桶突发容量 |
+| `probe.rate-limit.client-rps` | 10.0 | 单客户端令牌桶速率 |
+| `probe.rate-limit.client-burst` | 20 | 单客户端令牌桶突发容量 |
 
 ## 实现要点
 
