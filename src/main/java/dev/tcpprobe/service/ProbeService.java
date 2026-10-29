@@ -1,212 +1,229 @@
 package dev.tcpprobe.service;
 
-import dev.tcpprobe.config.Config;
-import dev.tcpprobe.error.ApiException;
+import dev.tcpprobe.ProbeProperties;
 import dev.tcpprobe.probe.ProbeResult;
 import dev.tcpprobe.probe.ProbeStatus;
 import dev.tcpprobe.probe.ProbeTarget;
 import dev.tcpprobe.probe.TcpProber;
-import dev.tcpprobe.util.Log;
+import jakarta.annotation.PreDestroy;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
-import java.util.UUID;
 import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.ThreadFactory;
-import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * 在后台执行探测批次，并把结果记录为 {@link ProbeTask}。
+ * 批量探测的调度与状态存储。
  *
- * <p>并发模型：</p>
+ * <p>线程模型只有两层：</p>
  * <ul>
- *   <li>{@code taskWorkers} 个平台线程运行整个批次。一个批次在等待其探测时会阻塞，因此这也
- *       限制了在途批次的个数。</li>
- *   <li>{@code maxProbesInFlight} 个线程组成探测池。池队列本身就是天然的背压：批次一多，
- *       队列就会增长，而按批次的截止时间会把长期得不到执行的探测变成 {@code TIMEOUT}
- *       结果，而不是无上限增长的延迟。</li>
- *   <li>{@code maxConcurrentTasks} 个许可在提交时获取。许可耗尽时，API 返回
- *       {@code 503 SERVER_BUSY}，这是一个诚实的“稍后再来”信号，而不是一个悄悄排队直到
- *       老化成超时的队列。</li>
+ *   <li>{@code taskPool}（大小 {@code workers}）每个任务占一个线程，直到整批结束。
+ *       这同时是“同时有多少批在跑”的上限。</li>
+ *   <li>{@code probePool}（大小 {@code maxInFlight}）执行单个目标的探测。池的队列就是背压：
+ *       目标一多，队列变长，批级截止时间会把还没轮到的目标变成 {@code TIMEOUT}，
+ *       而不是让请求无限期地堆着。</li>
  * </ul>
+ *
+ * <p>{@code maxConcurrentTasks} 个准入许可在提交时拿，拿不到直接返回 503，
+ * 这是一个诚实的“稍后再来”，比悄悄排队直到老化更强。</p>
  */
-public final class ProbeService {
+@Service
+public class ProbeService {
 
-    private final Config config;
+    private static final Logger log = LoggerFactory.getLogger(ProbeService.class);
+
+    private final ProbeProperties properties;
     private final TcpProber prober;
-    private final TaskRegistry registry;
-    private final Metrics metrics;
-    private final ExecutorService taskExecutor;
-    private final ExecutorService probeExecutor;
+    private final RateLimiter rateLimiter;
+    private final ExecutorService taskPool;
+    private final ExecutorService probePool;
     private final Semaphore taskSlots;
+    private final ConcurrentHashMap<String, ProbeTask> tasks = new ConcurrentHashMap<>();
 
-    public ProbeService(Config config, TcpProber prober, TaskRegistry registry, Metrics metrics) {
-        this.config = config;
+    private final AtomicLong submitted = new AtomicLong();
+    private final AtomicLong succeeded = new AtomicLong();
+    private final AtomicLong failed = new AtomicLong();
+    private final AtomicInteger tasksRunning = new AtomicInteger();
+    private final AtomicInteger probesInFlight = new AtomicInteger();
+    private final ConcurrentHashMap<ProbeStatus, AtomicLong> probesByStatus = new ConcurrentHashMap<>();
+
+    public ProbeService(ProbeProperties properties, TcpProber prober, RateLimiter rateLimiter) {
+        this.properties = properties;
         this.prober = prober;
-        this.registry = registry;
-        this.metrics = metrics;
-        this.taskSlots = new Semaphore(config.maxConcurrentTasks(), true);
-        this.taskExecutor = Executors.newFixedThreadPool(config.taskWorkers(), named("task", false));
-        this.probeExecutor = Executors.newFixedThreadPool(config.maxProbesInFlight(), named("probe", true));
+        this.rateLimiter = rateLimiter;
+        this.taskSlots = new Semaphore(properties.maxConcurrentTasks());
+        this.taskPool = Executors.newFixedThreadPool(properties.workers(), named("task", false));
+        this.probePool = Executors.newFixedThreadPool(properties.maxInFlight(), named("probe", true));
+        log.info("probe service ready: {}", properties.describe());
     }
 
     /**
-     * 不做任何校验，直接排期：处理器已经校验过目标。
+     * 提交一批目标，立即返回任务句柄。
      *
-     * @throws ApiException 当任务槽位预算耗尽时抛出 {@code 503 SERVER_BUSY}
+     * @throws dev.tcpprobe.web.ApiException 目标为空/超量时为 400，任务槽位耗尽时为 503
      */
     public ProbeTask submit(List<ProbeTarget> targets, int timeoutMs, ProbeTask.Mode mode) {
-        if (targets == null || targets.isEmpty()) {
-            throw ApiException.badRequest("EMPTY_TARGETS", "at least one target is required");
+        if (targets.isEmpty()) {
+            throw dev.tcpprobe.web.ApiException.badRequest("EMPTY_TARGETS", "at least one target is required");
         }
-        if (targets.size() > config.maxTargetsPerRequest()) {
-            throw ApiException.badRequest("TOO_MANY_TARGETS",
-                    "at most " + config.maxTargetsPerRequest() + " targets per request, got " + targets.size());
+        if (targets.size() > properties.maxTargetsPerRequest()) {
+            throw dev.tcpprobe.web.ApiException.badRequest("TOO_MANY_TARGETS",
+                    "at most " + properties.maxTargetsPerRequest() + " targets per request");
         }
         if (!taskSlots.tryAcquire()) {
-            throw ApiException.serverBusy("too many concurrent probe tasks, retry later");
+            throw dev.tcpprobe.web.ApiException.serverBusy();
         }
-        ProbeTask task = new ProbeTask(newTaskId(), targets, timeoutMs, mode);
-        registry.put(task);
-        metrics.taskSubmitted();
+
+        evictExpired();
+        ProbeTask task = new ProbeTask(nextId(), targets, timeoutMs, mode);
+        tasks.put(task.id(), task);
+        submitted.incrementAndGet();
         try {
-            taskExecutor.execute(() -> {
-                try {
-                    execute(task);
-                } catch (RuntimeException e) {
-                    Log.error("task %s failed unexpectedly".formatted(task.id()), e);
-                    task.fail("internal error: " + e.getMessage());
-                    metrics.taskFinished(false);
-                } finally {
-                    taskSlots.release();
-                }
-            });
-        } catch (RuntimeException e) {
+            taskPool.execute(() -> execute(task));
+        } catch (RejectedExecutionException e) {
             taskSlots.release();
-            throw ApiException.serverBusy("probe executor rejected the task: " + e.getMessage());
+            task.fail("probe service is shutting down");
+            tasks.remove(task.id(), task);
+            failed.incrementAndGet();
         }
         return task;
     }
 
-    /**
-     * 运行一个批次。包级可见性使执行细节留在服务内部，同时仍然允许测试同步驱动一个批次。
-     */
+    /** 执行一批目标；结果顺序与请求中的目标顺序一致。 */
     void execute(ProbeTask task) {
+        tasksRunning.incrementAndGet();
         task.markRunning();
-        metrics.taskStarted();
-        boolean success = false;
         try {
-            List<ProbeTarget> targets = task.targets();
-            List<Callable<ProbeResult>> calls = new ArrayList<>(targets.size());
-            for (ProbeTarget target : targets) {
-                calls.add(() -> probeOne(target, task.timeoutMs()));
+            List<Callable<ProbeResult>> calls = new ArrayList<>(task.targets().size());
+            for (ProbeTarget target : task.targets()) {
+                calls.add(() -> {
+                    probesInFlight.incrementAndGet();
+                    try {
+                        ProbeResult result = prober.probe(target, task.timeoutMs());
+                        probesByStatus.computeIfAbsent(result.status(), ignored -> new AtomicLong()).incrementAndGet();
+                        return result;
+                    } finally {
+                        probesInFlight.decrementAndGet();
+                    }
+                });
             }
 
-            long deadlineNanos = TimeUnit.MILLISECONDS.toNanos(config.overallDeadlineMs(targets.size()));
-            List<Future<ProbeResult>> futures = probeExecutor.invokeAll(calls, deadlineNanos, TimeUnit.NANOSECONDS);
+            long deadlineMs = properties.batchDeadlineMs(calls.size());
+            List<Future<ProbeResult>> futures =
+                    probePool.invokeAll(calls, deadlineMs, TimeUnit.MILLISECONDS);
 
-            List<ProbeResult> results = new ArrayList<>(targets.size());
+            List<ProbeResult> results = new ArrayList<>(futures.size());
             for (int i = 0; i < futures.size(); i++) {
-                ProbeTarget target = targets.get(i);
                 Future<ProbeResult> future = futures.get(i);
                 if (future.isCancelled()) {
-                    metrics.probeCancelled(ProbeStatus.TIMEOUT);
-                    results.add(ProbeResult.of(target, ProbeStatus.TIMEOUT, null, null,
-                            "batch deadline exceeded before the connection attempt started"));
-                    continue;
-                }
-                try {
+                    ProbeTarget target = task.targets().get(i);
+                    results.add(ProbeResult.failed(target, ProbeStatus.TIMEOUT,
+                            "batch deadline of " + deadlineMs + " ms exceeded before this target was probed"));
+                    probesByStatus.computeIfAbsent(ProbeStatus.TIMEOUT, ignored -> new AtomicLong()).incrementAndGet();
+                } else {
                     results.add(future.get());
-                } catch (ExecutionException e) {
-                    Throwable cause = e.getCause() == null ? e : e.getCause();
-                    results.add(ProbeResult.of(target, ProbeStatus.ERROR, null, null,
-                            cause.getClass().getSimpleName() + ": " + cause.getMessage()));
                 }
             }
             task.complete(results);
-            success = true;
-            Log.debug("task %s finished: %d targets in %d ms", task.id(), results.size(),
-                    Duration.between(task.createdAt(), java.time.Instant.now()).toMillis());
+            succeeded.incrementAndGet();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            task.fail("interrupted while probing");
-        } catch (RuntimeException e) {
-            task.fail(e.getClass().getSimpleName() + ": " + e.getMessage());
+            task.fail("probe batch was interrupted");
+            failed.incrementAndGet();
+        } catch (ExecutionException | RuntimeException e) {
+            log.error("probe batch {} failed", task.id(), e);
+            task.fail(e instanceof ExecutionException && e.getCause() != null
+                    ? String.valueOf(e.getCause()) : String.valueOf(e));
+            failed.incrementAndGet();
         } finally {
-            metrics.taskFinished(success);
+            tasksRunning.decrementAndGet();
+            taskSlots.release();
         }
     }
 
-    private ProbeResult probeOne(ProbeTarget target, int timeoutMs) {
-        metrics.probeStarted();
-        ProbeResult result;
-        try {
-            result = prober.probe(target, timeoutMs);
-        } catch (RuntimeException e) {
-            result = ProbeResult.of(target, ProbeStatus.ERROR, null, null,
-                    e.getClass().getSimpleName() + ": " + e.getMessage());
-        }
-        metrics.probeFinished(result.status());
-        return result;
-    }
-
+    /** 按 id 取任务；顺带清理过期任务。 */
     public Optional<ProbeTask> find(String taskId) {
-        return registry.get(taskId);
+        evictExpired();
+        return Optional.ofNullable(tasks.get(taskId));
     }
 
-    /** 驱逐已过期的任务和空闲的限流器状态；由调度器周期性调用。 */
-    public int evictExpired() {
-        int removed = registry.evictFinishedOlderThan(Duration.ofSeconds(config.taskTtlSeconds()));
-        metrics.taskExpired(removed);
-        return removed;
+    public RateLimiter rateLimiter() {
+        return rateLimiter;
     }
 
-    public Metrics metrics() {
-        return metrics;
-    }
+    /** {@code /api/v1/stats} 的内容。 */
+    public Map<String, Object> stats() {
+        Map<String, Object> tasksView = new LinkedHashMap<>();
+        tasksView.put("submitted", submitted.get());
+        tasksView.put("running", tasksRunning.get());
+        tasksView.put("succeeded", succeeded.get());
+        tasksView.put("failed", failed.get());
+        tasksView.put("stored", tasks.size());
 
-    public Config config() {
-        return config;
-    }
-
-    public void shutdown(Duration grace) {
-        taskExecutor.shutdownNow();
-        probeExecutor.shutdownNow();
-        try {
-            if (!taskExecutor.awaitTermination(grace.toMillis(), TimeUnit.MILLISECONDS)) {
-                Log.warn("task workers did not terminate within %d ms", grace.toMillis());
-            }
-            if (!probeExecutor.awaitTermination(grace.toMillis(), TimeUnit.MILLISECONDS)) {
-                Log.warn("probe workers did not terminate within %d ms", grace.toMillis());
-            }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        } finally {
-            // 服务拥有 prober，而 prober 又拥有 DNS resolver 池。
-            prober.close();
+        Map<String, Object> probesView = new LinkedHashMap<>();
+        long attempted = 0;
+        for (ProbeStatus status : ProbeStatus.values()) {
+            AtomicLong counter = probesByStatus.get(status);
+            long value = counter == null ? 0 : counter.get();
+            attempted += value;
+            probesView.put(status.name().toLowerCase(java.util.Locale.ROOT), value);
         }
+        probesView.put("attempted", attempted);
+        probesView.put("inFlight", probesInFlight.get());
+
+        Map<String, Object> stats = new LinkedHashMap<>();
+        stats.put("tasks", tasksView);
+        stats.put("probes", probesView);
+        stats.put("rateLimitedClients", rateLimiter.trackedClients());
+        return stats;
     }
 
-    private String newTaskId() {
-        return "p_" + UUID.randomUUID().toString().replace("-", "").substring(0, 16);
+    /** 删除超过 TTL 的已结束任务；提交和查询时顺手做，省掉一个定时线程。 */
+    void evictExpired() {
+        Duration ttl = Duration.ofSeconds(properties.taskTtlSeconds());
+        java.time.Instant cutoff = java.time.Instant.now().minus(ttl);
+        tasks.entrySet().removeIf(entry -> {
+            ProbeTask task = entry.getValue();
+            return task.isFinished()
+                    && task.finishedAt() != null
+                    && task.finishedAt().isBefore(cutoff);
+        });
+    }
+
+    private static String nextId() {
+        return "p_" + java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 16);
     }
 
     private static ThreadFactory named(String prefix, boolean daemon) {
-        AtomicInteger seq = new AtomicInteger();
+        AtomicInteger counter = new AtomicInteger();
         return runnable -> {
-            Thread t = new Thread(runnable, prefix + "-" + seq.incrementAndGet());
-            t.setDaemon(daemon);
-            t.setUncaughtExceptionHandler((thread, ex) -> Log.error("uncaught exception in " + thread.getName(), ex));
-            return t;
+            Thread thread = new Thread(runnable, prefix + "-" + counter.incrementAndGet());
+            thread.setDaemon(daemon);
+            return thread;
         };
+    }
+
+    @PreDestroy
+    public void shutdown() {
+        taskPool.shutdownNow();
+        probePool.shutdownNow();
+        prober.close();
     }
 }

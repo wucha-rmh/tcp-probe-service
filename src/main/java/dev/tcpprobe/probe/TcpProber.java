@@ -12,167 +12,218 @@ import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
 import java.nio.channels.SocketChannel;
 import java.util.Locale;
+import java.util.Objects;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 手写的 TCP 连通性探测器。
  *
- * <p>不使用任何第三方探测库：实现打开一个普通的 {@link SocketChannel}，在限定超时内完成 TCP 握手，
- * 并对结果进行分类。连接随后立即关闭——目标是可达性，而不是载荷交换。</p>
+ * <p>全部逻辑就是打开一个 {@link SocketChannel}、在限定时间内完成 TCP 握手，然后按结果分类。
+ * 没有第三方探测库：这个服务的价值恰恰在于把这段逻辑写清楚、可解释。</p>
  *
- * <p>设计说明：</p>
- * <ul>
- *   <li><b>DNS 的测量与限时都独立进行。</b>{@link InetAddress#getAllByName} 的阻塞时间可能远超连接超时，
- *       而且不受该超时约束。因此一次查找会通过 {@link DnsResolver} 在自带预算下执行，并作为 {@code dnsMs}
- *       上报，从而让“解析器慢”与“网络慢”保持可区分。</li>
- *   <li><b>每个解析出的地址都会被尝试。</b>一个拥有多条 A/AAAA 记录的主机，即使其中一条被过滤，
- *       只要另一个地址有响应，仍会报告 {@code CONNECTED}。每个地址的连接超时等于请求的超时，
- *       因此最坏情况是 {@code addresses × timeout}；批量级截止时间会将其截断。</li>
- *   <li><b>不重试。</b>在探测器内部重试会模糊延迟测量；需要重试的调用方可以重新提交任务，
- *       这样能让 API 保持诚实。</li>
- * </ul>
+ * <p>四个刻意的设计点：</p>
+ * <ol>
+ *   <li><b>DNS 单独限时。</b>{@link InetAddress#getAllByName} 自身没有超时参数，遇到坏掉的解析器
+ *       可能阻塞几十秒。所以查找放到 {@code dnsPool} 上执行，用 {@code Future.get(budget)} 等，
+ *       超时就放弃——否则一个域名会让整批目标一起变成超时。</li>
+ *   <li><b>多个 A/AAAA 记录逐个试。</b>某个地址被过滤掉时，另一个地址仍可能通，报告
+ *       {@code CONNECTED} 比报告第一个地址的失败更有用。一旦拿到 {@code REFUSED} 就直接结束：
+ *       主机已经证明可达，没必要把剩余预算花在同一个名字的其他地址上。</li>
+ *   <li><b>一个目标的总预算，而不是每个地址一份预算。</b>DNS 预算加握手预算就是上限，
+ *       逐地址共享剩余时间，因此最坏耗时是可预测的（批量层还有整体截止时间兜底）。</li>
+ *   <li><b>不重试。</b>探测器内部重试会让延迟数字失去意义；需要重试的调用方重新提交任务即可。</li>
+ * </ol>
  */
-public final class TcpProber {
+public final class TcpProber implements AutoCloseable {
 
-    /** 放弃前最多尝试多少个已解析出的地址。 */
+    /** 域名解析的可替换实现，只为测试“卡住的解析器”而存在。 */
+    @FunctionalInterface
+    public interface Lookup {
+        InetAddress[] resolve(String host) throws UnknownHostException;
+    }
+
+    /** 一个域名最多试几个地址，防止多 A 记录把预算摊得太薄。 */
     private static final int MAX_ADDRESS_ATTEMPTS = 4;
 
-    /**
-     * @param connectTimeoutMs 默认握手超时，在调用方未覆盖时使用
-     */
-    public TcpProber(int connectTimeoutMs) {
-        this(connectTimeoutMs, new DnsResolver(8), 2000);
-    }
-
-    /**
-     * @param connectTimeoutMs 默认握手超时
-     * @param resolver         由探测器持有；{@link #close()} 会将其关闭
-     * @param dnsTimeoutMs     一次域名查找的预算
-     */
-    public TcpProber(int connectTimeoutMs, DnsResolver resolver, int dnsTimeoutMs) {
-        if (connectTimeoutMs < 1) {
-            throw new IllegalArgumentException("connectTimeoutMs must be positive");
-        }
-        if (dnsTimeoutMs < 1) {
-            throw new IllegalArgumentException("dnsTimeoutMs must be positive");
-        }
-        this.defaultConnectTimeoutMs = connectTimeoutMs;
-        this.resolver = java.util.Objects.requireNonNull(resolver, "resolver");
-        this.dnsTimeoutMs = dnsTimeoutMs;
-    }
-
-    private final int defaultConnectTimeoutMs;
-    private final DnsResolver resolver;
+    private final int connectTimeoutMs;
     private final int dnsTimeoutMs;
+    private final Lookup lookup;
+    private final ExecutorService dnsPool;
 
-    public int defaultConnectTimeoutMs() {
-        return defaultConnectTimeoutMs;
+    public TcpProber(int connectTimeoutMs, int dnsTimeoutMs, int dnsThreads) {
+        this(connectTimeoutMs, dnsTimeoutMs, dnsThreads, InetAddress::getAllByName);
+    }
+
+    TcpProber(int connectTimeoutMs, int dnsTimeoutMs, int dnsThreads, Lookup lookup) {
+        if (connectTimeoutMs < 1 || dnsTimeoutMs < 1 || dnsThreads < 1) {
+            throw new IllegalArgumentException("timeouts and dnsThreads must be positive");
+        }
+        this.connectTimeoutMs = connectTimeoutMs;
+        this.dnsTimeoutMs = dnsTimeoutMs;
+        this.lookup = Objects.requireNonNull(lookup, "lookup");
+        AtomicInteger counter = new AtomicInteger();
+        ThreadFactory factory = runnable -> {
+            Thread thread = new Thread(runnable, "dns-" + counter.incrementAndGet());
+            thread.setDaemon(true);
+            return thread;
+        };
+        this.dnsPool = Executors.newFixedThreadPool(dnsThreads, factory);
+    }
+
+    public int connectTimeoutMs() {
+        return connectTimeoutMs;
     }
 
     public int dnsTimeoutMs() {
         return dnsTimeoutMs;
     }
 
-    /** 释放解析器线程池；此后不得再使用该探测器。 */
-    public void close() {
-        resolver.close();
-    }
-
+    /** 探测目标，使用默认连接预算。 */
     public ProbeResult probe(ProbeTarget target) {
-        return probe(target, defaultConnectTimeoutMs);
+        return probe(target, connectTimeoutMs);
     }
 
     /**
-     * 探测 {@code target} 且从不抛异常：每一种失败模式都会被映射到一个 {@link ProbeStatus}，
-     * 因此一批目标总能得到每个目标各自的结果。
+     * 探测目标，总预算为 {@code budgetMs}（DNS + 一个或多个地址的握手）。
+     *
+     * <p>永远不抛异常：每一种失败都会变成带 {@link ProbeStatus} 的结果，
+     * 这样一批目标总能拿到每个目标各自的结果。</p>
      */
-    public ProbeResult probe(ProbeTarget target, int connectTimeoutMs) {
-        if (connectTimeoutMs < 1) {
-            connectTimeoutMs = defaultConnectTimeoutMs;
-        }
+    public ProbeResult probe(ProbeTarget target, int budgetMs) {
+        int budget = budgetMs < 1 ? connectTimeoutMs : budgetMs;
 
         long dnsStart = System.nanoTime();
         InetAddress[] addresses;
-        boolean literal = isLiteral(target.host());
         try {
-            addresses = resolver.resolve(target.host(), dnsTimeoutMs);
-        } catch (UnknownHostException e) {
-            return ProbeResult.of(target, ProbeStatus.UNRESOLVED, null, null,
-                    "unknown host: " + target.host());
+            addresses = target.isIpLiteral()
+                    ? new InetAddress[] {InetAddress.getByName(target.host())}
+                    : resolve(target.host());
         } catch (DnsTimeoutException e) {
-            return ProbeResult.of(target, ProbeStatus.TIMEOUT, null, null, e.getMessage());
+            return ProbeResult.failed(target, ProbeStatus.TIMEOUT, e.getMessage());
+        } catch (UnknownHostException e) {
+            return ProbeResult.failed(target, ProbeStatus.UNRESOLVED, "unknown host: " + target.host());
         } catch (RuntimeException e) {
-            return ProbeResult.of(target, ProbeStatus.ERROR, null, null, safeMessage(e));
+            return ProbeResult.failed(target, ProbeStatus.ERROR, describe(e));
         }
-        long dnsMs = Math.max(0L, (System.nanoTime() - dnsStart) / 1_000_000L);
+        Long dnsMs = target.isIpLiteral() ? null : Math.max(0L, (System.nanoTime() - dnsStart) / 1_000_000L);
 
-        ProbeStatus lastStatus = null;
-        String lastDetail = null;
-        for (int i = 0; i < Math.min(addresses.length, MAX_ADDRESS_ATTEMPTS); i++) {
+        long deadline = System.nanoTime() + budget * 1_000_000L;
+        ProbeStatus lastStatus = ProbeStatus.TIMEOUT;
+        String lastDetail = "budget exhausted before the connection attempt started";
+
+        int attempts = Math.min(addresses.length, MAX_ADDRESS_ATTEMPTS);
+        for (int i = 0; i < attempts; i++) {
             InetAddress address = addresses[i];
+            long remainingNanos = deadline - System.nanoTime();
+            int remainingMs = (int) TimeUnit.NANOSECONDS.toMillis(remainingNanos);
+            if (remainingMs <= 0) {
+                lastStatus = ProbeStatus.TIMEOUT;
+                lastDetail = "budget of " + budget + " ms exhausted before " + address.getHostAddress()
+                        + " was tried";
+                break;
+            }
+
             long start = System.nanoTime();
             try (SocketChannel channel = SocketChannel.open()) {
                 Socket socket = channel.socket();
                 socket.setTcpNoDelay(true);
-                socket.connect(new InetSocketAddress(address, target.port()), connectTimeoutMs);
+                socket.connect(new InetSocketAddress(address, target.port()), remainingMs);
                 long latencyMs = Math.max(0L, (System.nanoTime() - start) / 1_000_000L);
-                return ProbeResult.of(target, ProbeStatus.CONNECTED, latencyMs, literal ? null : dnsMs, null);
+                return new ProbeResult(target, ProbeStatus.CONNECTED, latencyMs, dnsMs, null);
             } catch (SocketTimeoutException e) {
                 lastStatus = ProbeStatus.TIMEOUT;
-                lastDetail = "connect timed out after " + connectTimeoutMs + " ms";
-            } catch (NoRouteToHostException e) {
-                lastStatus = ProbeStatus.UNREACHABLE;
-                lastDetail = "no route to host: " + address.getHostAddress();
+                lastDetail = "connect timed out after " + remainingMs + " ms";
             } catch (PortUnreachableException e) {
                 lastStatus = ProbeStatus.UNREACHABLE;
                 lastDetail = "port unreachable: " + address.getHostAddress();
+            } catch (NoRouteToHostException e) {
+                lastStatus = ProbeStatus.UNREACHABLE;
+                lastDetail = "no route to host: " + address.getHostAddress();
             } catch (SocketException e) {
-                lastStatus = classifySocketException(e);
-                lastDetail = safeMessage(e);
+                lastStatus = classify(e);
+                lastDetail = describe(e);
                 if (lastStatus == ProbeStatus.REFUSED) {
-                    // 连接被拒绝已经证明主机可达；没必要把剩余超时浪费在同一个名字的其他地址上。
                     break;
                 }
-            } catch (IOException e) {
+            } catch (IOException | RuntimeException e) {
                 lastStatus = ProbeStatus.ERROR;
-                lastDetail = e.getClass().getSimpleName() + ": " + safeMessage(e);
-            } catch (RuntimeException e) {
-                lastStatus = ProbeStatus.ERROR;
-                lastDetail = e.getClass().getSimpleName() + ": " + safeMessage(e);
+                lastDetail = describe(e);
             }
         }
-        // 至少已尝试过一个地址（getAllByName 从不返回空数组）。
-        return ProbeResult.of(target, lastStatus == null ? ProbeStatus.ERROR : lastStatus,
-                null, literal ? null : dnsMs, lastDetail);
+        return new ProbeResult(target, lastStatus, null, dnsMs, lastDetail);
+    }
+
+    /** 在有界线程池上解析，超过 {@code dnsTimeoutMs} 就放弃。 */
+    private InetAddress[] resolve(String host) throws UnknownHostException, DnsTimeoutException {
+        Future<InetAddress[]> future = dnsPool.submit(() -> lookup.resolve(host));
+        try {
+            return future.get(dnsTimeoutMs, TimeUnit.MILLISECONDS);
+        } catch (TimeoutException e) {
+            // JDK 解析器不响应中断，这里只是把队列槽位还回去；线程本身要等系统调用返回。
+            future.cancel(true);
+            throw new DnsTimeoutException("dns resolution timed out after " + dnsTimeoutMs + " ms");
+        } catch (InterruptedException e) {
+            future.cancel(true);
+            Thread.currentThread().interrupt();
+            throw new DnsTimeoutException("dns resolution was interrupted");
+        } catch (ExecutionException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof UnknownHostException unknown) {
+                throw unknown;
+            }
+            if (cause instanceof RuntimeException runtime) {
+                throw runtime;
+            }
+            if (cause instanceof Error error) {
+                throw error;
+            }
+            throw new IllegalStateException(cause);
+        }
     }
 
     /** 把套接字层面的失败映射为 API 可见的状态。对测试可见。 */
-    static ProbeStatus classifySocketException(SocketException e) {
-        String msg = e.getMessage() == null ? "" : e.getMessage().toLowerCase(Locale.ROOT);
-        if (e instanceof ConnectException
-                && (msg.contains("refused") || msg.contains("拒绝") || msg.isEmpty())) {
+    static ProbeStatus classify(SocketException e) {
+        String message = e.getMessage() == null ? "" : e.getMessage().toLowerCase(Locale.ROOT);
+        if (message.contains("refused") || message.contains("拒绝")) {
             return ProbeStatus.REFUSED;
         }
-        if (msg.contains("refused") || msg.contains("拒绝")) {
+        if (e instanceof ConnectException && message.isEmpty()) {
             return ProbeStatus.REFUSED;
         }
-        if (msg.contains("unreachable") || msg.contains("no route")) {
+        if (message.contains("unreachable") || message.contains("no route")) {
             return ProbeStatus.UNREACHABLE;
         }
-        if (msg.contains("timed out") || msg.contains("timeout")) {
+        if (message.contains("timed out") || message.contains("timeout")) {
             return ProbeStatus.TIMEOUT;
         }
         return ProbeStatus.UNREACHABLE;
     }
 
-    private static boolean isLiteral(String host) {
-        if (host.indexOf(':') >= 0) {
-            return true;
-        }
-        return host.matches("^\\d{1,3}(\\.\\d{1,3}){3}$");
+    private static String describe(Throwable t) {
+        String message = t.getMessage();
+        return message == null || message.isBlank() ? t.getClass().getSimpleName() : message;
     }
 
-    private static String safeMessage(Throwable t) {
-        String m = t.getMessage();
-        return m == null || m.isBlank() ? t.getClass().getSimpleName() : m;
+    /** 停掉 DNS 线程池；之后不可再用该探测器。 */
+    @Override
+    public void close() {
+        dnsPool.shutdownNow();
+    }
+
+    /** 解析超时，映射为 {@link ProbeStatus#TIMEOUT}。 */
+    static final class DnsTimeoutException extends Exception {
+
+        private static final long serialVersionUID = 1L;
+
+        DnsTimeoutException(String message) {
+            super(message);
+        }
     }
 }

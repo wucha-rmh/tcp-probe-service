@@ -2,76 +2,86 @@ package dev.tcpprobe.service;
 
 import org.junit.jupiter.api.Test;
 
-import java.util.concurrent.atomic.AtomicLong;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.assertj.core.api.Assertions.assertThat;
 
 class RateLimiterTest {
 
-    private final AtomicLong nanos = new AtomicLong(0);
-
-    private RateLimiter limiter(double rps, int burst, double clientRps, int clientBurst) {
-        return new RateLimiter(rps, burst, clientRps, clientBurst, nanos::get);
+    private static RateLimiter limiter(double clientRps, int clientBurst, double globalRps, int globalBurst) {
+        return new RateLimiter(new dev.tcpprobe.ProbeProperties(
+                2000, 2000, 8, 200, 16, 2, 600, 30000, 1048576,
+                new dev.tcpprobe.ProbeProperties.RateLimit(globalRps, globalBurst, clientRps, clientBurst)));
     }
 
     @Test
-    void allowsBurstThenDenies() {
-        RateLimiter limiter = limiter(1, 2, 1, 2);
-        assertTrue(limiter.acquire("a").allowed());
-        assertTrue(limiter.acquire("a").allowed());
-        RateLimiter.Decision denied = limiter.acquire("a");
-        assertFalse(denied.allowed());
-        assertEquals("global", denied.limitReason(), "the shared bucket empties first");
-        assertTrue(denied.retryAfterSeconds() >= 1);
+    void allowsTheBurstThenDenies() {
+        RateLimiter limiter = limiter(0.2, 2, 1000, 1000);
+
+        assertThat(limiter.acquire("10.0.0.1").allowed()).isTrue();
+        assertThat(limiter.acquire("10.0.0.1").allowed()).isTrue();
+
+        RateLimiter.Decision denied = limiter.acquire("10.0.0.1");
+        assertThat(denied.allowed()).isFalse();
+        assertThat(denied.retryAfterSeconds()).isGreaterThanOrEqualTo(1L);
+        assertThat(denied.remaining()).isZero();
     }
 
     @Test
-    void refillsTokensOverTime() {
-        RateLimiter limiter = limiter(1, 1, 1, 1);
-        assertTrue(limiter.acquire("a").allowed());
-        assertFalse(limiter.acquire("a").allowed());
-        nanos.addAndGet(1_000_000_000L);
-        assertTrue(limiter.acquire("a").allowed());
+    void reportsRemainingTokensAfterEachRequest() {
+        RateLimiter limiter = limiter(0.2, 5, 1000, 1000);
+
+        assertThat(limiter.acquire("10.0.0.1").remaining()).isEqualTo(4);
+        assertThat(limiter.acquire("10.0.0.1").remaining()).isEqualTo(3);
     }
 
     @Test
-    void globalDenialLeavesClientBucketUntouched() {
-        RateLimiter limiter = limiter(1, 1, 10, 10);
-        assertTrue(limiter.acquire("a").allowed());
-        RateLimiter.Decision denied = limiter.acquire("b");
-        assertEquals("global", denied.limitReason());
-        nanos.addAndGet(1_000_000_000L);
-        RateLimiter.Decision allowed = limiter.acquire("b");
-        assertTrue(allowed.allowed());
-        assertEquals(9.0, allowed.remaining(), 1e-9, "client b never spent a token on the denied call");
+    void refillsOverTime() throws InterruptedException {
+        RateLimiter limiter = limiter(100, 1, 1000, 1000);
+
+        assertThat(limiter.acquire("10.0.0.1").allowed()).isTrue();
+        assertThat(limiter.acquire("10.0.0.1").allowed()).isFalse();
+
+        Thread.sleep(60);
+        assertThat(limiter.acquire("10.0.0.1").allowed()).isTrue();
     }
 
     @Test
-    void deniesPerClientIndependently() {
-        RateLimiter limiter = limiter(100, 100, 1, 1);
-        assertTrue(limiter.acquire("a").allowed());
-        RateLimiter.Decision denied = limiter.acquire("a");
-        assertEquals("client", denied.limitReason());
-        assertTrue(limiter.acquire("b").allowed(), "another client has its own budget");
+    void keepsClientsIndependent() {
+        RateLimiter limiter = limiter(0.2, 1, 1000, 1000);
+
+        assertThat(limiter.acquire("10.0.0.1").allowed()).isTrue();
+        assertThat(limiter.acquire("10.0.0.1").allowed()).isFalse();
+        // 另一个客户端有自己的桶，不受影响。
+        assertThat(limiter.acquire("10.0.0.2").allowed()).isTrue();
+        assertThat(limiter.trackedClients()).isEqualTo(2);
     }
 
     @Test
-    void sweepsIdleClientBuckets() {
-        RateLimiter limiter = limiter(100, 100, 100, 100);
-        limiter.acquire("a");
-        limiter.acquire("b");
-        assertEquals(2, limiter.trackedClients());
-        nanos.addAndGet(700_000_000_000L);
-        assertEquals(2, limiter.sweepIdle(600));
-        assertEquals(0, limiter.trackedClients());
+    void globalBucketProtectsTheService() {
+        RateLimiter limiter = limiter(1000, 1000, 0.2, 1);
+
+        assertThat(limiter.acquire("10.0.0.1").allowed()).isTrue();
+        RateLimiter.Decision denied = limiter.acquire("10.0.0.2");
+        assertThat(denied.allowed()).isFalse();
+        assertThat(denied.retryAfterSeconds()).isGreaterThanOrEqualTo(1L);
     }
 
     @Test
-    void unknownClientKeyIsBucketedTogether() {
-        RateLimiter limiter = limiter(100, 100, 1, 1);
-        assertTrue(limiter.acquire(null).allowed());
-        assertEquals("client", limiter.acquire("").limitReason());
+    void forgetsIdleClients() throws InterruptedException {
+        RateLimiter limiter = limiter(1000, 1000, 1000, 1000);
+        limiter.acquire("10.0.0.1");
+        limiter.acquire("10.0.0.2");
+
+        Thread.sleep(10);
+        assertThat(limiter.forgetIdle(0)).isEqualTo(2);
+        assertThat(limiter.trackedClients()).isZero();
+    }
+
+    @Test
+    void treatsMissingClientKeyAsOneBucket() {
+        RateLimiter limiter = limiter(0.2, 1, 1000, 1000);
+
+        assertThat(limiter.acquire(null).allowed()).isTrue();
+        assertThat(limiter.acquire("").allowed()).isFalse();
+        assertThat(limiter.trackedClients()).isEqualTo(1);
     }
 }

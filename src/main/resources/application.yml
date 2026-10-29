@@ -1,0 +1,35 @@
+spring:
+  application:
+    name: tcp-probe-service
+  # 请求处理用虚拟线程：探测是阻塞 I/O，但阻塞发生在自己的线程池里，
+  # 这里让 Tomcat 不再受平台线程数限制。
+  threads:
+    virtual:
+      enabled: true
+
+server:
+  port: 8080
+  shutdown: graceful
+
+app:
+  version: 1.0.0
+
+probe:
+  timeout-ms: 2000          # 单次 TCP 握手的预算
+  dns-timeout-ms: 2000      # 单次域名解析的预算
+  max-in-flight: 64         # 同时在途的探测数，也是探测线程池大小
+  max-targets-per-request: 200
+  max-concurrent-tasks: 16  # 同时在跑的任务数，超出返回 503
+  workers: 4                # 任务线程数
+  task-ttl-seconds: 600     # 已完成任务保留多久
+  sync-max-wait-ms: 30000   # sync 模式最长等待
+  max-body-bytes: 1048576   # 请求体上限，超出 413
+  rate-limit:
+    global-rps: 50
+    global-burst: 100
+    client-rps: 10
+    client-burst: 20
+
+logging:
+  level:
+    root: INFO
