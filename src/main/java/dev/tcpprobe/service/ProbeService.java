@@ -60,6 +60,8 @@ public class ProbeService {
     private final AtomicLong submitted = new AtomicLong();
     private final AtomicLong succeeded = new AtomicLong();
     private final AtomicLong failed = new AtomicLong();
+    /** 因为并发任务已满被拒（503）的提交次数；429 由限流器自己统计。 */
+    private final AtomicLong rejectedBusy = new AtomicLong();
     private final AtomicInteger tasksRunning = new AtomicInteger();
     private final AtomicInteger probesInFlight = new AtomicInteger();
     private final ConcurrentHashMap<ProbeStatus, AtomicLong> probesByStatus = new ConcurrentHashMap<>();
@@ -88,6 +90,7 @@ public class ProbeService {
                     "at most " + properties.maxTargetsPerRequest() + " targets per request");
         }
         if (!taskSlots.tryAcquire()) {
+            rejectedBusy.incrementAndGet();
             throw dev.tcpprobe.web.ApiException.serverBusy();
         }
 
@@ -175,6 +178,7 @@ public class ProbeService {
         tasksView.put("running", tasksRunning.get());
         tasksView.put("succeeded", succeeded.get());
         tasksView.put("failed", failed.get());
+        tasksView.put("rejectedBusy", rejectedBusy.get());
         tasksView.put("stored", tasks.size());
 
         Map<String, Object> probesView = new LinkedHashMap<>();

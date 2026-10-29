@@ -87,6 +87,11 @@ class ProbeServiceTest {
                     assertThat(e.status()).isEqualTo(503);
                     assertThat(e.code()).isEqualTo("SERVER_BUSY");
                 });
+
+        // 被拒的提交必须能在 /api/v1/stats 里看见，否则「服务并发满了」在监控上是隐形的。
+        @SuppressWarnings("unchecked")
+        Map<String, Object> tasks = (Map<String, Object>) service.stats().get("tasks");
+        assertThat(tasks).containsEntry("rejectedBusy", 1L);
     }
 
     @Test
