@@ -19,11 +19,12 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class RateLimiter {
 
     /**
-     * @param allowed          本次是否放行
+     * @param allowed           本次是否放行
+     * @param limit             拒掉它的桶：{@code "global"} 或 {@code "client"}；放行时为 {@code null}
      * @param retryAfterSeconds 建议的重试间隔，仅在拒绝时有意义
-     * @param remaining        放行后该客户端桶里剩余的令牌数
+     * @param remaining         放行后该客户端桶里剩余的令牌数
      */
-    public record Decision(boolean allowed, long retryAfterSeconds, int remaining) {
+    public record Decision(boolean allowed, String limit, long retryAfterSeconds, int remaining) {
     }
 
     private final Bucket global;
@@ -42,13 +43,13 @@ public final class RateLimiter {
     public Decision acquire(String clientKey) {
         String key = clientKey == null || clientKey.isBlank() ? "-" : clientKey;
         if (!global.tryAcquire()) {
-            return new Decision(false, global.secondsUntilNextToken(), 0);
+            return new Decision(false, "global", global.secondsUntilNextToken(), 0);
         }
         Bucket bucket = clients.computeIfAbsent(key, ignored -> new Bucket(clientBurst, clientRps));
         if (!bucket.tryAcquire()) {
-            return new Decision(false, bucket.secondsUntilNextToken(), 0);
+            return new Decision(false, "client", bucket.secondsUntilNextToken(), 0);
         }
-        return new Decision(true, 0, (int) Math.floor(bucket.available()));
+        return new Decision(true, null, 0, (int) Math.floor(bucket.available()));
     }
 
     /** 当前跟踪的客户端桶数量，用于指标与测试。 */

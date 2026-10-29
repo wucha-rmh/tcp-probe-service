@@ -102,7 +102,7 @@ public class ProbeController {
         RateLimiter.Decision decision = service.rateLimiter().acquire(request.getRemoteAddr());
         if (!decision.allowed()) {
             throw ApiException.tooManyRequests(
-                    "client rate limit exceeded; retry in " + decision.retryAfterSeconds() + "s",
+                    decision.limit() + " rate limit exceeded; retry in " + decision.retryAfterSeconds() + "s",
                     decision.retryAfterSeconds());
         }
 

@@ -16,11 +16,15 @@ class RateLimiterTest {
     void allowsTheBurstThenDenies() {
         RateLimiter limiter = limiter(0.2, 2, 1000, 1000);
 
-        assertThat(limiter.acquire("10.0.0.1").allowed()).isTrue();
+        RateLimiter.Decision allowed = limiter.acquire("10.0.0.1");
+        assertThat(allowed.allowed()).isTrue();
+        // 放行时没有「哪个桶拒绝」可言。
+        assertThat(allowed.limit()).isNull();
         assertThat(limiter.acquire("10.0.0.1").allowed()).isTrue();
 
         RateLimiter.Decision denied = limiter.acquire("10.0.0.1");
         assertThat(denied.allowed()).isFalse();
+        assertThat(denied.limit()).isEqualTo("client");
         assertThat(denied.retryAfterSeconds()).isGreaterThanOrEqualTo(1L);
         assertThat(denied.remaining()).isZero();
     }
@@ -62,6 +66,8 @@ class RateLimiterTest {
         assertThat(limiter.acquire("10.0.0.1").allowed()).isTrue();
         RateLimiter.Decision denied = limiter.acquire("10.0.0.2");
         assertThat(denied.allowed()).isFalse();
+        // 全局桶拒绝时，客户端桶还是满的——这一点必须能从 Decision 里看出来。
+        assertThat(denied.limit()).isEqualTo("global");
         assertThat(denied.retryAfterSeconds()).isGreaterThanOrEqualTo(1L);
     }
 
