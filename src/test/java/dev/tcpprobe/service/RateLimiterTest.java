@@ -12,6 +12,12 @@ class RateLimiterTest {
                 new dev.tcpprobe.ProbeProperties.RateLimit(globalRps, globalBurst, clientRps, clientBurst)));
     }
 
+    private static dev.tcpprobe.ProbeProperties properties() {
+        return new dev.tcpprobe.ProbeProperties(
+                2000, 2000, 8, 200, 16, 2, 600, 30000, 1048576,
+                new dev.tcpprobe.ProbeProperties.RateLimit(1000, 1000, 1000, 1000));
+    }
+
     @Test
     void allowsTheBurstThenDenies() {
         RateLimiter limiter = limiter(0.2, 2, 1000, 1000);
@@ -80,6 +86,32 @@ class RateLimiterTest {
         Thread.sleep(10);
         assertThat(limiter.forgetIdle(0)).isEqualTo(2);
         assertThat(limiter.trackedClients()).isZero();
+    }
+
+    @Test
+    void sweepsIdleClientsOnAcquire() throws InterruptedException {
+        // 每次申请都尝试清理（间隔 0），空闲阈值 1 秒。
+        RateLimiter limiter = new RateLimiter(properties(), 0L, 1L);
+
+        limiter.acquire("10.0.0.1");
+        limiter.acquire("10.0.0.2");
+        assertThat(limiter.trackedClients()).isEqualTo(2);
+
+        Thread.sleep(1100);
+        limiter.acquire("10.0.0.3");
+
+        // 1、2 已空闲超过 1 秒被清掉，只剩刚创建的 3。
+        assertThat(limiter.trackedClients()).isEqualTo(1);
+    }
+
+    @Test
+    void doesNotSweepBeforeTheIntervalElapses() {
+        // 间隔 1 小时：任何一次申请都不该触发清理。
+        RateLimiter limiter = new RateLimiter(properties(), 3_600_000_000_000L, 0L);
+
+        limiter.acquire("10.0.0.1");
+        limiter.acquire("10.0.0.2");
+        assertThat(limiter.trackedClients()).isEqualTo(2);
     }
 
     @Test

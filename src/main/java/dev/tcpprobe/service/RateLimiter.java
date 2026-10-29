@@ -1,9 +1,11 @@
 package dev.tcpprobe.service;
 
 import dev.tcpprobe.ProbeProperties;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * 两级令牌桶限流：一个全局桶保护整个服务，另一个按客户端（通常是对端 IP）分桶。
@@ -27,20 +29,41 @@ public final class RateLimiter {
     public record Decision(boolean allowed, String limit, long retryAfterSeconds, int remaining) {
     }
 
+    /** 默认最多每隔这么久清理一次空闲客户端桶，避免每个请求都扫一遍 map。 */
+    private static final long DEFAULT_SWEEP_INTERVAL_NANOS = 30_000_000_000L;
+    /** 默认的「空闲」判定：10 分钟没有请求的客户端桶可以丢掉。 */
+    private static final long DEFAULT_IDLE_CLIENT_SECONDS = 600L;
+
     private final Bucket global;
     private final double clientRps;
     private final int clientBurst;
     private final ConcurrentHashMap<String, Bucket> clients = new ConcurrentHashMap<>();
+    private final long sweepIntervalNanos;
+    private final long idleSeconds;
+    private final AtomicLong lastSweepNanos = new AtomicLong(System.nanoTime());
 
+    /** 交给 Spring 用这个构造器注入；测试用下面的包内构造器调整清理策略。 */
+    @Autowired
     public RateLimiter(ProbeProperties properties) {
+        this(properties, DEFAULT_SWEEP_INTERVAL_NANOS, DEFAULT_IDLE_CLIENT_SECONDS);
+    }
+
+    /**
+     * @param sweepIntervalNanos 两次清理之间至少间隔多久；传 {@code 0} 表示每次申请都尝试清理（供测试用）
+     * @param idleSeconds        超过这么久没有请求的客户端桶会被丢掉
+     */
+    RateLimiter(ProbeProperties properties, long sweepIntervalNanos, long idleSeconds) {
         ProbeProperties.RateLimit limit = properties.rateLimit();
         this.global = new Bucket(limit.globalBurst(), limit.globalRps());
         this.clientRps = limit.clientRps();
         this.clientBurst = limit.clientBurst();
+        this.sweepIntervalNanos = sweepIntervalNanos;
+        this.idleSeconds = idleSeconds;
     }
 
-    /** 为 {@code clientKey} 申请一次准入。 */
+    /** 为 {@code clientKey} 申请一次准入；顺带（限频地）清理空闲客户端桶。 */
     public Decision acquire(String clientKey) {
+        sweepIdleClients();
         String key = clientKey == null || clientKey.isBlank() ? "-" : clientKey;
         if (!global.tryAcquire()) {
             return new Decision(false, "global", global.secondsUntilNextToken(), 0);
@@ -52,12 +75,28 @@ public final class RateLimiter {
         return new Decision(true, null, 0, (int) Math.floor(bucket.available()));
     }
 
+    /**
+     * 惰性清理：不引入后台线程，只在有请求进来时顺手扫一遍，并且最多每 {@code sweepIntervalNanos} 扫一次。
+     *
+     * <p>用 CAS 抢占「本次清理权」，并发的请求里只有一个真正去扫 map，其余立刻返回。</p>
+     */
+    private void sweepIdleClients() {
+        long now = System.nanoTime();
+        long last = lastSweepNanos.get();
+        if (now - last < sweepIntervalNanos) {
+            return;
+        }
+        if (lastSweepNanos.compareAndSet(last, now)) {
+            forgetIdle(idleSeconds);
+        }
+    }
+
     /** 当前跟踪的客户端桶数量，用于指标与测试。 */
     public int trackedClients() {
         return clients.size();
     }
 
-    /** 丢掉空闲超过 {@code idleSeconds} 的客户端桶，避免唯一源地址把 map 撑爆。 */
+    /** 丢掉空闲超过 {@code idleSeconds} 的客户端桶，避免唯一源地址把 map 撑爆；通常由 {@link #acquire} 惰性触发。 */
     public int forgetIdle(long idleSeconds) {
         long idleNanos = idleSeconds * 1_000_000_000L;
         long now = System.nanoTime();
