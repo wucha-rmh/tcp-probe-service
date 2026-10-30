@@ -13,34 +13,35 @@
 
 运行只需要 JDK 21+（不需要 Maven、数据库或中间件）；从源码构建还需要 Maven 3.9+。
 
-**方式一：直接运行仓库里打好的包**（本机没有 Maven 时用这个）
+**方式一：直接下载打好的包**（本机没有 Maven 时用这个）
+
+打好的 jar 挂在 [Releases](https://github.com/wucha-rmh/tcp-probe-service/releases) 页上，从页面下载 `tcp-probe-service-1.0.0.jar`，或者用命令行：
 
 ```bash
-git clone https://github.com/wucha-rmh/tcp-probe-service.git
-cd tcp-probe-service
-java -jar dist/tcp-probe-service-1.0.0.jar     # 默认监听 0.0.0.0:8080
+curl -L -O https://github.com/wucha-rmh/tcp-probe-service/releases/download/v1.0.0/tcp-probe-service-1.0.0.jar
+java -jar tcp-probe-service-1.0.0.jar          # 默认监听 0.0.0.0:8080
 ```
 
-`dist/` 下同时有 `SHA256SUMS`，想确认包没损坏：
+同一个 Release 里附带 `SHA256SUMS`，想确认包没损坏：
 
 ```bash
-sha256sum -c dist/SHA256SUMS        # Linux / macOS
-Get-FileHash dist/tcp-probe-service-1.0.0.jar -Algorithm SHA256   # Windows PowerShell
+sha256sum -c SHA256SUMS                                  # Linux / macOS
+Get-FileHash tcp-probe-service-1.0.0.jar -Algorithm SHA256   # Windows PowerShell
 ```
 
 **方式二：从源码构建**
 
 ```bash
+git clone https://github.com/wucha-rmh/tcp-probe-service.git
+cd tcp-probe-service
 mvn -q clean package
-java -jar target/tcp-probe-service.jar         # 与 dist 里的包内容一致
+java -jar target/tcp-probe-service.jar         # 与 Release 里的包内容一致
 ```
 
-`dist/` 里的包就是 `mvn package` 的产物，提交进仓库是为了让没有 Maven 的环境也能直接运行；需要时用自己的构建覆盖 `dist/` 即可。
-
-换端口、调参数：
+换端口、调参数（两种方式都一样）：
 
 ```bash
-java -jar dist/tcp-probe-service-1.0.0.jar --server.port=9000 --probe.timeout-ms=1000
+java -jar tcp-probe-service-1.0.0.jar --server.port=9000 --probe.timeout-ms=1000
 ```
 
 ## API
