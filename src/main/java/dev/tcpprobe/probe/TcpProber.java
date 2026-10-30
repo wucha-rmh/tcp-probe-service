@@ -23,7 +23,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * 手写的 TCP 连通性探测器。
+ * TCP 连通性探测器。
  *
  * <p>全部逻辑就是打开一个 {@link SocketChannel}、在限定时间内完成 TCP 握手，然后按结果分类。
  * 没有第三方探测库：这个服务的价值恰恰在于把这段逻辑写清楚、可解释。</p>

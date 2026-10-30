@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TCP 探测 · 测试台</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #16191f; --line: #262b34; --text: #e6e9ef; --muted: #8890a0;
+    --accent: #4c8dff; --ok: #2ecc71; --warn: #f5a623; --bad: #ff5c5c; --dns: #b07cff; --gray: #7a8497;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 28px 20px; background: var(--bg); color: var(--text);
+         font: 14px/1.6 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; }
+  .wrap { max-width: 860px; margin: 0 auto; }
+  h1 { font-size: 16px; margin: 0 0 14px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--gray); flex: none; }
+  .dot.ok { background: var(--ok); } .dot.bad { background: var(--bad); }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px; margin-bottom: 12px; }
+  label { display: block; font-size: 12px; color: var(--muted); margin: 0 0 4px; }
+  textarea, input, select {
+    width: 100%; background: #0d0f13; color: var(--text); border: 1px solid var(--line);
+    border-radius: 5px; padding: 7px 9px; font: 13px/1.5 ui-monospace, Consolas, monospace;
+  }
+  textarea { min-height: 84px; resize: vertical; }
+  .row { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
+  .row > .grow { flex: 1 1 140px; }
+  .row > .tight { flex: 0 0 120px; }
+  button { background: #1c2028; color: var(--text); border: 1px solid var(--line);
+           border-radius: 5px; padding: 7px 12px; font-size: 13px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  td.mono { font-family: ui-monospace, Consolas, monospace; }
+  .chip { display: inline-block; padding: 0 7px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+  .c-CONNECTED { background: rgba(46,204,113,.15); color: var(--ok); }
+  .c-REFUSED { background: rgba(245,166,35,.15); color: var(--warn); }
+  .c-TIMEOUT { background: rgba(255,92,92,.15); color: var(--bad); }
+  .c-UNRESOLVED { background: rgba(176,124,255,.15); color: var(--dns); }
+  .c-UNREACHABLE { background: rgba(122,132,151,.2); color: var(--gray); }
+  .c-ERROR { background: rgba(255,92,92,.25); color: var(--bad); }
+  .meta { color: var(--muted); font-size: 12px; margin-top: 8px; }
+  .err { color: #ffb3b3; font-size: 13px; white-space: pre-wrap; word-break: break-word; margin-top: 8px; }
+  .log { background: #0b0d11; border: 1px solid var(--line); border-radius: 5px;
+         padding: 8px 10px; height: 220px; overflow: auto;
+         font: 12px/1.55 ui-monospace, Consolas, monospace; color: #cbd2e0; white-space: pre-wrap; }
+  .log .t { color: var(--muted); }
+  .log .e { color: var(--bad); }
+  .log .s { color: var(--ok); }
+  .head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px; }
+  h2 { font-size: 13px; margin: 0; color: var(--muted); font-weight: 500; }
+  .hint { color: var(--muted); font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1><span id="dot" class="dot"></span>TCP 探测测试台 <span class="hint" id="healthText">检查中…</span></h1>
+
+  <div class="card">
+    <label for="targets">目标（每行一个 host:port）</label>
+    <textarea id="targets" spellcheck="false">127.0.0.1:8080
+127.0.0.1:1
+192.0.2.1:9
+no-such-host.invalid:80</textarea>
+    <div class="row" style="margin-top:8px">
+      <div class="tight"><label for="timeout">超时 ms</label><input id="timeout" type="number" value="2000" min="50" max="60000"></div>
+      <div class="tight"><label for="mode">模式</label>
+        <select id="mode"><option value="async">async</option><option value="sync">sync</option></select></div>
+      <button id="submit" class="primary">发起探测</button>
+      <button id="limitTest">测限流</button>
+    </div>
+  </div>
+
+  <div class="card" id="resultCard" style="display:none">
+    <div class="head"><h2>结果</h2><span class="hint" id="taskMeta"></span></div>
+    <table>
+      <thead><tr><th>目标</th><th>状态</th><th>延迟</th><th>DNS</th><th>说明</th></tr></thead>
+      <tbody id="resultBody"></tbody>
+    </table>
+    <div class="meta" id="summary"></div>
+    <div class="err" id="errBox"></div>
+  </div>
+
+  <div class="card">
+    <div class="head">
+      <h2>运行日志 <span class="hint" id="logCount"></span></h2>
+      <div class="row" style="gap:6px">
+        <button id="saveLog">保存日志</button>
+        <button id="clearLog">清空</button>
+      </div>
+    </div>
+    <div class="log" id="log">（暂无记录）</div>
+    <div class="hint" style="margin-top:6px">日志保存在本浏览器；「保存日志」会下载为 .txt 文件。</div>
+  </div>
+</div>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const LOG_KEY = "tcp-probe-ui-log";
+  const MAX_LINES = 2000;
+  let entries = [];
+
+  // ---------- 日志 ----------
+  function log(kind, message) {
+    entries.push({ at: new Date().toISOString(), kind, message });
+    if (entries.length > MAX_LINES) entries = entries.slice(-MAX_LINES);
+    try { localStorage.setItem(LOG_KEY, JSON.stringify(entries)); } catch (e) { /* 存不下就只留在内存 */ }
+    renderLog();
+  }
+
+  function renderLog() {
+    const box = $("log");
+    if (entries.length === 0) {
+      box.textContent = "（暂无记录）";
+      $("logCount").textContent = "";
+      return;
+    }
+    box.innerHTML = entries.map((e) => {
+      const cls = e.kind === "error" ? "e" : e.kind === "ok" ? "s" : "";
+      const t = new Date(e.at).toLocaleTimeString("zh-CN", { hour12: false });
+      return '<span class="t">' + escapeHtml(t) + "</span>  " +
+             '<span class="' + cls + '">' + escapeHtml(e.message) + "</span>";
+    }).join("\n");
+    $("logCount").textContent = "(" + entries.length + " 行)";
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function loadLog() {
+    try { entries = JSON.parse(localStorage.getItem(LOG_KEY) || "[]"); } catch (e) { entries = []; }
+    renderLog();
+  }
+
+  function saveLog() {
+    if (entries.length === 0) { log("info", "日志为空，没什么可保存的"); return; }
+    const d = new Date();
+    const pad = (n) => String(n).padStart(2, "0");
+    const stamp = d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + "-" +
+                  pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds());
+    const head = [
+      "# TCP 探测测试台日志",
+      "# 导出时间: " + d.toISOString(),
+      "# 服务地址: " + location.origin,
+      "# 行数: " + entries.length,
+      ""
+    ].join("\n");
+    const body = entries.map((e) => {
+      const t = new Date(e.at).toISOString().replace("T", " ").replace("Z", "");
+      const tag = e.kind === "error" ? "ERROR" : e.kind === "ok" ? "OK   " : "INFO ";
+      return "[" + t + "] " + tag + " " + e.message;
+    }).join("\n");
+    const blob = new Blob([head + body + "\n"], { type: "text/plain;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "tcp-probe-log-" + stamp + ".txt";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    log("ok", "日志已保存为 tcp-probe-log-" + stamp + ".txt（" + entries.length + " 行）");
+  }
+
+  function escapeHtml(v) {
+    return String(v == null ? "" : v).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+
+  // ---------- 请求 ----------
+  function readTargets() {
+    return $("targets").value.split("\n").map((s) => s.trim()).filter(Boolean);
+  }
+
+  async function postProbe(mode) {
+    const targets = readTargets();
+    if (targets.length === 0) { log("error", "未填写目标"); return null; }
+    const timeoutMs = Number($("timeout").value);
+    const t0 = performance.now();
+    const res = await fetch("/api/v1/probes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ targets, timeoutMs, mode: mode || $("mode").value })
+    });
+    const ms = Math.round(performance.now() - t0);
+    const text = await res.text();
+    let data = {};
+    try { data = text ? JSON.parse(text) : {}; } catch (e) { data = { raw: text }; }
+
+    const remain = res.headers.get("X-RateLimit-Remaining");
+    if (res.status === 429) {
+      const retry = res.headers.get("Retry-After");
+      log("error", "POST /api/v1/probes -> 429 RATE_LIMITED (" + ms + "ms) Retry-After=" + retry + "s targets=" + targets.length);
+      return { status: 429, data, retry, ms };
+    }
+    if (res.status >= 400) {
+      const code = (data.error && data.error.code) || "";
+      log("error", "POST /api/v1/probes -> " + res.status + " " + code + " (" + ms + "ms) " + ((data.error && data.error.message) || ""));
+      if (data.error && data.error.details) data.error.details.forEach((d) => log("error", "  · " + d));
+      return { status: res.status, data, ms };
+    }
+    log("ok", "POST /api/v1/probes -> " + res.status + " (" + ms + "ms) targets=" + targets.length +
+      " timeout=" + timeoutMs + "ms mode=" + (mode || $("mode").value) + (remain ? " remaining=" + remain : ""));
+    return { status: res.status, data, remain, ms };
+  }
+
+  async function waitForTask(taskId) {
+    let task = null;
+    for (let i = 0; i < 12; i++) {
+      const t0 = performance.now();
+      const res = await fetch("/api/v1/probes/" + encodeURIComponent(taskId) + "?waitMs=5000");
+      const ms = Math.round(performance.now() - t0);
+      const data = await res.json();
+      task = data;
+      log("info", "GET /api/v1/probes/" + taskId + " -> " + res.status + " (" + ms + "ms) status=" + data.status);
+      if (res.status === 200 || res.status >= 400) break;
+    }
+    return task;
+  }
+
+  function renderTask(task) {
+    if (!task || !task.taskId) return;
+    $("resultCard").style.display = "block";
+    const count = task.results ? task.results.length : task.targetCount;
+    $("taskMeta").textContent = task.taskId + " · " + task.mode + " · " + count + " 个目标";
+    const body = $("resultBody");
+    body.innerHTML = "";
+    (task.results || []).forEach((r) => {
+      const tr = document.createElement("tr");
+      const status = String(r.status || "");
+      tr.innerHTML =
+        '<td class="mono">' + escapeHtml(r.target) + "</td>" +
+        '<td><span class="chip c-' + escapeHtml(status) + '">' + escapeHtml(status) + "</span></td>" +
+        '<td class="mono">' + (r.latencyMs == null ? "—" : r.latencyMs + "ms") + "</td>" +
+        '<td class="mono">' + (r.dnsMs == null ? "—" : r.dnsMs + "ms") + "</td>" +
+        '<td class="hint">' + escapeHtml(r.detail || "") + "</td>";
+      body.appendChild(tr);
+    });
+    const s = task.summary;
+    if (s) {
+      const counts = Object.entries(s).filter(([k]) => k !== "averageLatencyMs")
+        .filter(([, v]) => Number(v) > 0).map(([k, v]) => k + "=" + v).join(" ");
+      $("summary").textContent = "汇总 " + counts +
+        (s.averageLatencyMs == null ? "" : "　平均延迟 " + s.averageLatencyMs + "ms");
+      log("ok", "任务 " + task.taskId + " " + task.status + " " + counts);
+    }
+    if (task.error) {
+      $("errBox").textContent = "任务失败：" + task.error;
+      log("error", "任务 " + task.taskId + " 失败：" + task.error);
+    } else {
+      $("errBox").textContent = "";
+    }
+  }
+
+  // ---------- 交互 ----------
+  $("submit").addEventListener("click", async () => {
+    const btn = $("submit");
+    btn.disabled = true;
+    $("errBox").textContent = "";
+    try {
+      const r = await postProbe();
+      if (!r) return;
+      if (r.status === 202 || (r.status === 200 && r.data.status !== "SUCCEEDED")) {
+        renderTask(await waitForTask(r.data.taskId));
+      } else if (r.status === 200) {
+        renderTask(r.data);
+      }
+    } catch (e) {
+      log("error", "请求异常：" + e);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  $("limitTest").addEventListener("click", async () => {
+    const btn = $("limitTest");
+    btn.disabled = true;
+    try {
+      log("info", "开始限流测试：连续提交直到收到 429");
+      for (let i = 1; i <= 25; i++) {
+        const r = await postProbe("async");
+        if (!r) break;
+        if (r.status === 429) { log("error", "第 " + i + " 次被限流，Retry-After=" + r.retry + "s"); break; }
+        if (i === 25) log("info", "25 次都通过了，当前额度较宽松");
+      }
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  $("saveLog").addEventListener("click", saveLog);
+  $("clearLog").addEventListener("click", () => {
+    entries = [];
+    try { localStorage.removeItem(LOG_KEY); } catch (e) {}
+    renderLog();
+  });
+
+  async function checkHealth() {
+    const t0 = performance.now();
+    try {
+      const res = await fetch("/healthz");
+      const data = await res.json();
+      const ms = Math.round(performance.now() - t0);
+      $("dot").className = "dot ok";
+      $("healthText").textContent = "v" + data.version + " · 在途任务 " + data.tasksRunning +
+        " · 在途探测 " + data.probesInFlight + " · " + ms + "ms";
+      log("ok", "GET /healthz -> 200 (" + ms + "ms) version=" + data.version);
+    } catch (e) {
+      $("dot").className = "dot bad";
+      $("healthText").textContent = "服务不可达";
+      log("error", "healthz 不可达：" + e);
+    }
+  }
+
+  loadLog();
+  checkHealth();
+</script>
+</body>
+</html>

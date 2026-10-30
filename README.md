@@ -69,6 +69,10 @@ curl -s "http://localhost:8080/api/v1/probes/$ID?waitMs=5000"
 
 任务未完成时返回 `202`，此时响应不含 `results` 与 `summary`；完成后返回 `200`。
 
+## 测试台
+
+启动后打开 <http://localhost:8080/index.html>（一个静态页面，无外部依赖）：填目标批量提交，`async` 会自动用长轮询取结果，六种状态彩色标注，`429` 直接显示 `Retry-After`，右下角「运行日志」记录每次请求并可用「保存日志」导出为 `tcp-probe-log-*.txt`。它只是为了手工验证方便，删掉不影响服务。
+
 ## 探测状态
 
 | status | 含义 | 主机可达 |

@@ -58,6 +58,7 @@ public class ProbeController {
                 "GET  /api/v1/probes/{taskId}?waitMs=0",
                 "GET  /api/v1/stats",
                 "GET  /healthz"));
+        body.put("ui", "/index.html");
         return body;
     }
 
