@@ -11,19 +11,36 @@
 
 ## 环境与启动
 
-需要 JDK 21+ 与 Maven 3.9+，运行时无外部依赖（不需要数据库或中间件）。
+运行只需要 JDK 21+（不需要 Maven、数据库或中间件）；从源码构建还需要 Maven 3.9+。
+
+**方式一：直接运行仓库里打好的包**（本机没有 Maven 时用这个）
 
 ```bash
 git clone https://github.com/wucha-rmh/tcp-probe-service.git
 cd tcp-probe-service
-mvn -q clean package
-java -jar target/tcp-probe-service.jar        # 默认监听 0.0.0.0:8080
+java -jar dist/tcp-probe-service-1.0.0.jar     # 默认监听 0.0.0.0:8080
 ```
+
+`dist/` 下同时有 `SHA256SUMS`，想确认包没损坏：
+
+```bash
+sha256sum -c dist/SHA256SUMS        # Linux / macOS
+Get-FileHash dist/tcp-probe-service-1.0.0.jar -Algorithm SHA256   # Windows PowerShell
+```
+
+**方式二：从源码构建**
+
+```bash
+mvn -q clean package
+java -jar target/tcp-probe-service.jar         # 与 dist 里的包内容一致
+```
+
+`dist/` 里的包就是 `mvn package` 的产物，提交进仓库是为了让没有 Maven 的环境也能直接运行；需要时用自己的构建覆盖 `dist/` 即可。
 
 换端口、调参数：
 
 ```bash
-java -jar target/tcp-probe-service.jar --server.port=9000 --probe.timeout-ms=1000
+java -jar dist/tcp-probe-service-1.0.0.jar --server.port=9000 --probe.timeout-ms=1000
 ```
 
 ## API
